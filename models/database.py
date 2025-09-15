@@ -1,10 +1,17 @@
 """数据库模型定义"""
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 import uuid
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+
+# 上海时区
+SHANGHAI_TZ = timezone(timedelta(hours=8))
+
+def get_shanghai_time():
+    """获取上海时间"""
+    return datetime.now(SHANGHAI_TZ)
 
 Base = declarative_base()
 
@@ -12,11 +19,11 @@ class User(Base):
     """用户模型"""
     __tablename__ = "users"
     
-    id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    id = Column(String(32), primary_key=True, index=True, default=lambda: uuid.uuid4().hex)
     username = Column(String(50), unique=True, index=True, nullable=False)
     email = Column(String(100), unique=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=get_shanghai_time)
+    updated_at = Column(DateTime, default=get_shanghai_time, onupdate=get_shanghai_time)
     is_active = Column(Boolean, default=True)
     
     # 关系
@@ -27,11 +34,11 @@ class ChatSession(Base):
     """聊天会话模型"""
     __tablename__ = "chat_sessions"
     
-    id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    id = Column(String(32), primary_key=True, index=True, default=lambda: uuid.uuid4().hex)
+    user_id = Column(String(32), ForeignKey("users.id"), nullable=False)
     title = Column(String(200), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=get_shanghai_time)
+    updated_at = Column(DateTime, default=get_shanghai_time, onupdate=get_shanghai_time)
     is_active = Column(Boolean, default=True)
     
     # 关系
@@ -42,12 +49,13 @@ class ChatMessage(Base):
     """聊天消息模型"""
     __tablename__ = "chat_messages"
     
-    id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    session_id = Column(String(36), ForeignKey("chat_sessions.id"), nullable=False)
-    message_id = Column(String(36), nullable=False, index=True, default=lambda: str(uuid.uuid4()))  # 消息唯一标识符
+    id = Column(String(32), primary_key=True, index=True, default=lambda: uuid.uuid4().hex)
+    session_id = Column(String(32), ForeignKey("chat_sessions.id"), nullable=False)
+    request_id = Column(String(32), nullable=False, index=True, default=lambda: uuid.uuid4().hex)  # 请求ID，用于追溯
     role = Column(String(20), nullable=False)  # user, assistant, system
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    sequence_number = Column(Integer, nullable=False, default=0)  # 消息序号，确保正确排序
+    created_at = Column(DateTime, default=get_shanghai_time)
     
     # 扩展字段
     use_knowledge_base = Column(Boolean, default=False)
@@ -63,7 +71,7 @@ class Document(Base):
     __tablename__ = "documents"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    user_id = Column(String(32), ForeignKey("users.id"), nullable=False)
     filename = Column(String(255), nullable=False)
     original_filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
@@ -75,9 +83,9 @@ class Document(Base):
     processed_at = Column(DateTime)
     error_message = Column(Text)
     
-    # 元数据
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 时间戳
+    created_at = Column(DateTime, default=get_shanghai_time)
+    updated_at = Column(DateTime, default=get_shanghai_time, onupdate=get_shanghai_time)
     
     # 关系
     user = relationship("User", back_populates="documents")
@@ -96,8 +104,8 @@ class DocumentChunk(Base):
     vector_id = Column(String(100))  # Milvus中的向量ID
     embedding_model = Column(String(100))
     
-    # 元数据
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # 时间戳
+    created_at = Column(DateTime, default=get_shanghai_time)
     
     # 关系
     document = relationship("Document", back_populates="chunks")
@@ -120,9 +128,9 @@ class KnowledgeBase(Base):
     document_count = Column(Integer, default=0)
     chunk_count = Column(Integer, default=0)
     
-    # 元数据
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 时间戳
+    created_at = Column(DateTime, default=get_shanghai_time)
+    updated_at = Column(DateTime, default=get_shanghai_time, onupdate=get_shanghai_time)
     is_active = Column(Boolean, default=True)
 
 class SearchLog(Base):
@@ -130,7 +138,7 @@ class SearchLog(Base):
     __tablename__ = "search_logs"
     
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(String(36), ForeignKey("chat_sessions.id"))
+    session_id = Column(String(32), ForeignKey("chat_sessions.id"))
     query = Column(Text, nullable=False)
     search_type = Column(String(20), nullable=False)  # knowledge_base, web_search, hybrid
     
@@ -143,5 +151,5 @@ class SearchLog(Base):
     response_time = Column(Float)  # 响应时间（秒）
     knowledge_confidence = Column(Float)  # 知识库置信度
     
-    # 元数据
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # 时间戳
+    created_at = Column(DateTime, default=get_shanghai_time)

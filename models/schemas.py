@@ -2,6 +2,15 @@
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
+import json
+
+# 自定义JSON编码器，统一时间格式
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            # 格式化为 YYYY-MM-DD HH:MM:SS，去掉T分隔符
+            return obj.strftime('%Y-%m-%d %H:%M:%S')
+        return super().default(obj)
 
 # 基础响应模型
 class BaseResponse(BaseModel):
@@ -26,12 +35,18 @@ class UserResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.strftime('%Y-%m-%d %H:%M:%S')
+        }
 
 # 聊天相关模型
 class ChatRequest(BaseModel):
     """聊天请求模型"""
     message: str = Field(..., min_length=1, max_length=10000)
     session_id: Optional[str] = None
+    session_name: Optional[str] = None  # 会话名称
+    is_first: bool = False  # 是否为新会话
+    user_id: Optional[str] = None  # 用户ID，如果为空则使用默认用户ID
     use_knowledge_base: bool = True
     use_web_search: bool = True
     stream: bool = True
@@ -44,6 +59,9 @@ class ChatMessage(BaseModel):
     
     class Config:
         from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.strftime('%Y-%m-%d %H:%M:%S')
+        }
 
 class ChatSessionCreate(BaseModel):
     """创建聊天会话请求模型"""
@@ -61,10 +79,18 @@ class ChatSessionResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.strftime('%Y-%m-%d %H:%M:%S')
+        }
 
 class ChatSessionDelete(BaseModel):
     """删除聊天会话请求模型"""
     session_id: str
+
+class ChatSessionUpdateTitle(BaseModel):
+    """修改会话标题请求模型"""
+    session_id: str
+    title: str = Field(..., min_length=1, max_length=200)
 
 class ChatResponse(BaseModel):
     """聊天响应模型"""
@@ -95,6 +121,9 @@ class DocumentResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.strftime('%Y-%m-%d %H:%M:%S')
+        }
 
 class DocumentChunkResponse(BaseModel):
     """文档分块响应模型"""
@@ -130,6 +159,9 @@ class KnowledgeBaseResponse(BaseModel):
     
     class Config:
         from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.strftime('%Y-%m-%d %H:%M:%S')
+        }
 
 # 搜索相关模型
 class SearchRequest(BaseModel):
@@ -178,6 +210,11 @@ class TaskStatus(BaseModel):
     error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.strftime('%Y-%m-%d %H:%M:%S')
+        }
 
 # 配置模型
 class ModelConfig(BaseModel):

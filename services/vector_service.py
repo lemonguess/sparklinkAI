@@ -472,6 +472,24 @@ class VectorService:
             logger.error(f"Milvus连接测试失败: {e}")
             return False
     
+    def test_connection_sync(self) -> bool:
+        """同步测试连接"""
+        try:
+            if not self._connected:
+                success = self.connect_sync()
+                if not success:
+                    return False
+            
+            # 尝试列出集合
+            collections = utility.list_collections()
+            logger.info(f"Milvus连接测试成功，找到 {len(collections)} 个集合")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Milvus连接测试失败: {e}")
+            return False
+    
     def get_connection_info(self) -> Dict[str, Any]:
         """获取连接信息"""
         return {

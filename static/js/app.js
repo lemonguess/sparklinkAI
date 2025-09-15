@@ -4,14 +4,24 @@ class SparkLinkApp {
         this.currentSessionId = null;
         this.sessions = [];
         this.knowledgeBases = [];
+        this.messageCache = new Map(); // 缓存会话消息，避免重复加载
         this.settings = {
             maxTokens: 2000,
             temperature: 0.7,
             searchTopK: 5,
             similarityThreshold: 0.7
         };
+        this.currentReader = null; // 用于停止流式输出
+        this.currentRequestId = null; // 用于停止流式输出
         
         this.init();
+    }
+    
+    // 生成UUID（符合uuid4.hex格式）
+    generateUUID() {
+        return 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'.replace(/[x]/g, function() {
+            return (Math.random() * 16 | 0).toString(16);
+        });
     }
     
     init() {
@@ -30,8 +40,8 @@ class SparkLinkApp {
             }, 500);
         }, 100);
         
-        // 定期检查系统状态
-        setInterval(() => this.checkSystemStatus(), 30000);
+        // 移除定期检查系统状态，仅在页面刷新时调用
+        // setInterval(() => this.checkSystemStatus(), 30000);
     }
     
     hidePageLoader() {
@@ -53,6 +63,9 @@ class SparkLinkApp {
                 this.sendMessage();
             }
         });
+        
+        // 停止生成
+        document.getElementById('stopBtn').addEventListener('click', () => this.stopGeneration());
         
         // 自动调整输入框高度
         document.getElementById('messageInput').addEventListener('input', (e) => {
@@ -162,10 +175,14 @@ class SparkLinkApp {
     
     async loadSessions() {
         try {
-            const response = await fetch('/api/v1/chat/sessions');
+            const response = await fetch('/api/v1/chat/sessions?user_id=admin123456789abcdef0123456789ab');
             if (response.ok) {
                 const data = await response.json();
                 this.sessions = data.data || [];
+                // 按updated_at时间字符串倒序排列
+                this.sessions.sort((a, b) => {
+                    return new Date(b.updated_at) - new Date(a.updated_at);
+                });
                 this.renderSessions();
             }
         } catch (error) {
@@ -175,7 +192,7 @@ class SparkLinkApp {
     
     async loadKnowledgeBases() {
         try {
-            const response = await fetch('/api/v1/kb/knowledge-bases');
+            const response = await fetch('/api/v1/knowledge_base/knowledge_bases');
             if (response.ok) {
                 const data = await response.json();
                 this.knowledgeBases = data.data || [];
@@ -207,11 +224,38 @@ class SparkLinkApp {
             const sessionElement = document.createElement('div');
             sessionElement.className = `session-item ${session.id === this.currentSessionId ? 'active' : ''}`;
             sessionElement.innerHTML = `
-                <div class="session-title">${session.title}</div>
-                <div class="session-time">${this.formatTime(session.updated_at)}</div>
+                <div class="session-content">
+                    <div class="session-title" data-session-id="${session.id}">${session.title}</div>
+                    <div class="session-time">${this.formatTime(session.updated_at)}</div>
+                </div>
+                <div class="session-actions">
+                    <button class="edit-title-btn" data-session-id="${session.id}" title="编辑标题">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="delete-session-btn" data-session-id="${session.id}" title="删除会话">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
             `;
             
-            sessionElement.addEventListener('click', () => this.selectSession(session.id));
+            // 点击会话内容区域选择会话
+            const sessionContent = sessionElement.querySelector('.session-content');
+            sessionContent.addEventListener('click', () => this.selectSession(session.id));
+            
+            // 点击编辑按钮
+            const editBtn = sessionElement.querySelector('.edit-title-btn');
+            editBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.editSessionTitle(session.id, session.title);
+            });
+            
+            // 点击删除按钮
+            const deleteBtn = sessionElement.querySelector('.delete-session-btn');
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.deleteSession(session.id, session.title);
+            });
+            
             sessionsList.appendChild(sessionElement);
         });
     }
@@ -260,32 +304,29 @@ class SparkLinkApp {
     }
     
     async createNewSession() {
-        try {
-            const response = await fetch('/api/v1/chat/sessions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    title: '新会话',
-                    user_id: 1 // 临时使用固定用户ID
-                })
-            });
-            
-            if (response.ok) {
-                const data = await response.json();
-                this.sessions.unshift(data.data);
-                this.renderSessions();
-                this.selectSession(data.data.id);
-                this.showToast('新会话创建成功', 'success');
-            } else {
-                const error = await response.json();
-                this.showToast(error.detail || '创建会话失败', 'error');
-            }
-        } catch (error) {
-            console.error('创建会话失败:', error);
-            this.showToast('创建会话失败', 'error');
-        }
+        // 清空当前会话选择
+        this.currentSessionId = null;
+        this.renderSessions();
+        
+        // 清空聊天界面，显示欢迎消息
+        const chatMessages = document.getElementById('chatMessages');
+        chatMessages.innerHTML = `
+            <div class="welcome-message">
+                <div class="welcome-icon">
+                    <i class="fas fa-robot"></i>
+                </div>
+                <h3>开始新的对话</h3>
+                <p>您可以问我任何问题，我会尽力帮助您。</p>
+            </div>
+        `;
+        
+        // 更新会话标题
+        document.getElementById('currentSessionTitle').textContent = '新会话';
+        
+        // 聚焦到输入框
+        document.getElementById('messageInput').focus();
+        
+        this.showToast('准备开始新对话', 'success');
     }
     
     async selectSession(sessionId) {
@@ -301,12 +342,199 @@ class SparkLinkApp {
         await this.loadSessionMessages(sessionId);
     }
     
+    editSessionTitle(sessionId, currentTitle) {
+        const titleElement = document.querySelector(`[data-session-id="${sessionId}"].session-title`);
+        if (!titleElement) return;
+        
+        // 创建输入框
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = currentTitle;
+        input.className = 'session-title-input';
+        input.maxLength = 200;
+        
+        // 替换标题元素
+        titleElement.style.display = 'none';
+        titleElement.parentNode.insertBefore(input, titleElement);
+        
+        // 聚焦并选中文本
+        input.focus();
+        input.select();
+        
+        // 处理保存
+        const saveTitle = async () => {
+            const newTitle = input.value.trim();
+            if (newTitle && newTitle !== currentTitle) {
+                await this.updateSessionTitle(sessionId, newTitle);
+            }
+            // 恢复显示
+            input.remove();
+            titleElement.style.display = 'block';
+        };
+        
+        // 处理取消
+        const cancelEdit = () => {
+            input.remove();
+            titleElement.style.display = 'block';
+        };
+        
+        // 绑定事件
+        input.addEventListener('blur', saveTitle);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                saveTitle();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelEdit();
+            }
+        });
+    }
+
+    updateSessionTitleWithAnimation(sessionId, newTitle) {
+        console.log('执行updateSessionTitleWithAnimation:', sessionId, newTitle);
+        // 更新本地会话数据
+        const session = this.sessions.find(s => s.id === sessionId);
+        if (session) {
+            console.log('找到会话:', session);
+            session.title = newTitle;
+            
+            // 如果是当前会话，更新当前会话标题显示
+            if (sessionId === this.currentSessionId) {
+                const currentTitleElement = document.getElementById('currentSessionTitle');
+                if (currentTitleElement) {
+                    // 添加渐变动画效果
+                    currentTitleElement.style.transition = 'opacity 0.3s ease';
+                    currentTitleElement.style.opacity = '0.5';
+                    
+                    setTimeout(() => {
+                        currentTitleElement.textContent = newTitle;
+                        currentTitleElement.style.opacity = '1';
+                    }, 150);
+                }
+            }
+            
+            // 更新会话列表中的标题，带动画效果
+            const sessionElement = document.querySelector(`[data-session-id="${sessionId}"]`);
+            if (sessionElement) {
+                const titleElement = sessionElement.querySelector('.session-title');
+                if (titleElement) {
+                    // 添加闪烁动画效果
+                    titleElement.style.transition = 'all 0.3s ease';
+                    titleElement.style.backgroundColor = '#e3f2fd';
+                    titleElement.style.transform = 'scale(1.02)';
+                    
+                    setTimeout(() => {
+                        titleElement.textContent = newTitle;
+                        setTimeout(() => {
+                            titleElement.style.backgroundColor = '';
+                            titleElement.style.transform = 'scale(1)';
+                        }, 300);
+                    }, 150);
+                }
+            }
+        }
+    }
+    
+    async updateSessionTitle(sessionId, newTitle) {
+        try {
+            const response = await fetch('/api/v1/chat/sessions/update_title', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    title: newTitle
+                })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                // 更新本地会话数据
+                const session = this.sessions.find(s => s.id === sessionId);
+                if (session) {
+                    session.title = newTitle;
+                }
+                // 重新渲染会话列表
+                this.renderSessions();
+                this.showToast('标题修改成功', 'success');
+            } else {
+                this.showToast(result.message || '修改标题失败', 'error');
+            }
+        } catch (error) {
+            console.error('修改会话标题失败:', error);
+            this.showToast('修改标题失败', 'error');
+        }
+    }
+    
+    async deleteSession(sessionId, sessionTitle) {
+        if (!confirm(`确定要删除会话"${sessionTitle}"吗？\n\n注意：此操作将永久删除会话及其所有消息，无法恢复。`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/v1/chat/sessions/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    session_id: sessionId
+                })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                // 从本地会话列表中移除
+                this.sessions = this.sessions.filter(s => s.id !== sessionId);
+                
+                // 如果删除的是当前会话，清空聊天界面
+                if (this.currentSessionId === sessionId) {
+                    this.currentSessionId = null;
+                    const chatMessages = document.getElementById('chatMessages');
+                    chatMessages.innerHTML = `
+                        <div class="welcome-message">
+                            <div class="welcome-icon">
+                                <i class="fas fa-robot"></i>
+                            </div>
+                            <h3>欢迎使用 SparkLink AI</h3>
+                            <p>我是您的智能助手，可以帮您进行对话、搜索知识库、获取信息等。</p>
+                        </div>
+                    `;
+                    document.getElementById('currentSessionTitle').textContent = '选择或创建一个会话开始聊天';
+                }
+                
+                // 清除消息缓存
+                this.messageCache.delete(sessionId);
+                
+                // 重新渲染会话列表
+                this.renderSessions();
+                this.showToast('会话删除成功', 'success');
+            } else {
+                this.showToast(result.message || '删除会话失败', 'error');
+            }
+        } catch (error) {
+            console.error('删除会话失败:', error);
+            this.showToast('删除会话失败', 'error');
+        }
+    }
+    
     async loadSessionMessages(sessionId) {
         try {
+            // 检查缓存
+            if (this.messageCache.has(sessionId)) {
+                this.renderMessages(this.messageCache.get(sessionId));
+                return;
+            }
+            
             const response = await fetch(`/api/v1/chat/sessions/${sessionId}/messages`);
             if (response.ok) {
                 const data = await response.json();
-                this.renderMessages(data.data || []);
+                const messages = data.data || [];
+                // 缓存消息
+                this.messageCache.set(sessionId, messages);
+                this.renderMessages(messages);
             }
         } catch (error) {
             console.error('加载消息失败:', error);
@@ -343,9 +571,32 @@ class SparkLinkApp {
         
         if (!message) return;
         
-        if (!this.currentSessionId) {
-            this.showToast('请先选择或创建一个会话', 'warning');
-            return;
+        // 获取当前会话信息或创建新会话
+        let sessionId = this.currentSessionId;
+        let currentSession = this.sessions.find(s => s.id === sessionId);
+        let isFirstMessage = false;
+        
+        // 如果没有选中会话，创建临时会话对象
+        if (!sessionId || !currentSession) {
+            sessionId = this.generateUUID();
+            const currentTime = new Date().toISOString().replace('T', ' ').slice(0, 19);
+            
+            currentSession = {
+                id: sessionId,
+                title: '',
+                created_at: currentTime,
+                updated_at: currentTime,
+                is_first: true
+            };
+            
+            // 添加到会话列表最前面
+            this.sessions.unshift(currentSession);
+            this.currentSessionId = sessionId;
+            isFirstMessage = true;
+            
+            // 更新UI显示
+            document.getElementById('currentSessionTitle').textContent = '新会话';
+            this.renderSessions();
         }
         
         // 清空输入框
@@ -358,19 +609,35 @@ class SparkLinkApp {
         // 显示打字指示器
         this.showTypingIndicator();
         
+        // 禁用发送按钮，显示停止按钮
+        const sendButton = document.getElementById('sendBtn');
+        sendButton.disabled = true;
+        sendButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        
+        // 显示停止按钮
+        const stopButton = document.getElementById('stopBtn');
+        if (stopButton) {
+            stopButton.style.display = 'inline-block';
+        }
+        
+        // 禁用输入框
+        messageInput.disabled = true;
+        
         try {
             const useKnowledgeBase = document.getElementById('useKnowledgeBase').checked;
             const useWebSearch = document.getElementById('useWebSearch').checked;
             
             // 使用流式接口
-            const response = await fetch('/api/v1/chat/chat/stream', {
+            const response = await fetch('/api/v1/chat/stream', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
                     message: message,
-                    session_id: this.currentSessionId,
+                    session_id: sessionId,
+                    session_name: currentSession ? currentSession.title : '',
+                    is_first: isFirstMessage,
                     use_knowledge_base: useKnowledgeBase,
                     use_web_search: useWebSearch,
                     max_tokens: this.settings.maxTokens,
@@ -387,6 +654,7 @@ class SparkLinkApp {
             
             // 处理流式响应
             const reader = response.body.getReader();
+            this.currentReader = reader; // 保存reader引用用于停止
             const decoder = new TextDecoder();
             let assistantMessageElement = null;
             let fullResponse = '';
@@ -406,9 +674,43 @@ class SparkLinkApp {
                         try {
                             const data = JSON.parse(line.slice(6));
                             
-                            if (data.type === 'start') {
+                            if (data.type === 'request_id') {
+                                this.currentRequestId = data.request_id;
+                            } else if (data.type === 'start') {
                                 // 创建助手消息元素
                                 assistantMessageElement = this.createAssistantMessageElement();
+                            } else if (data.type === 'session_info') {
+                                // 更新会话信息
+                                this.currentSessionId = data.session_id;
+                                
+                                // 如果是首次消息，更新本地会话对象
+                                if (isFirstMessage) {
+                                    const localSession = this.sessions.find(s => s.id === data.session_id);
+                                    if (localSession) {
+                                        localSession.title = data.session_name || localSession.title;
+                                        localSession.updated_at = data.updated_at || localSession.updated_at;
+                                        localSession.is_first = false; // 移除首次标记
+                                        document.getElementById('currentSessionTitle').textContent = localSession.title;
+                                    }
+                                } else {
+                                    // 刷新会话列表但不重新加载消息
+                                    await this.loadSessions();
+                                    // 找到会话并更新标题
+                                    const session = this.sessions.find(s => s.id === data.session_id);
+                                    if (session) {
+                                        document.getElementById('currentSessionTitle').textContent = session.title;
+                                    }
+                                }
+                                
+                                // 清空欢迎消息（如果存在）
+                                const welcomeMessage = document.querySelector('.welcome-message');
+                                if (welcomeMessage) {
+                                    welcomeMessage.remove();
+                                }
+                            } else if (data.type === 'title') {
+                                // 处理标题更新事件
+                                console.log('收到title事件:', data);
+                                this.updateSessionTitleWithAnimation(data.session_id, data.title);
                             } else if (data.type === 'content') {
                                 // 追加内容
                                 fullResponse += data.content;
@@ -424,6 +726,10 @@ class SparkLinkApp {
                                 if (assistantMessageElement) {
                                     this.addSourcesToMessage(assistantMessageElement, sources);
                                 }
+                                // 清除当前会话的缓存，确保下次加载时获取最新消息
+                                if (this.currentSessionId) {
+                                    this.messageCache.delete(this.currentSessionId);
+                                }
                             } else if (data.type === 'error') {
                                 this.addMessageToChat('assistant', '抱歉，处理您的请求时出现了错误：' + data.error);
                             }
@@ -438,7 +744,51 @@ class SparkLinkApp {
             this.hideTypingIndicator();
             console.error('发送消息失败:', error);
             this.addMessageToChat('assistant', '抱歉，网络连接出现问题，请稍后重试。');
+        } finally {
+            this.currentReader = null; // 清除reader引用
+            this.currentRequestId = null; // 清除request_id
+            this.resetChatUI();
         }
+    }
+    
+    resetChatUI() {
+        // 恢复发送按钮状态
+        const sendButton = document.getElementById('sendBtn');
+        sendButton.disabled = false;
+        sendButton.innerHTML = '<i class="fas fa-paper-plane"></i>';
+        
+        // 隐藏停止按钮
+        const stopButton = document.getElementById('stopBtn');
+        if (stopButton) {
+            stopButton.style.display = 'none';
+        }
+        
+        // 恢复输入框状态
+        const messageInput = document.getElementById('messageInput');
+        messageInput.disabled = false;
+        messageInput.focus();
+    }
+    
+    async stopGeneration() {
+        if (this.currentRequestId) {
+            try {
+                await fetch('/api/v1/chat/stop', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ request_id: this.currentRequestId })
+                });
+                this.showToast('已发送停止请求');
+            } catch (error) {
+                console.error('停止请求失败:', error);
+                this.showToast('停止请求失败', 'error');
+            }
+        }
+        if (this.currentReader) {
+            this.currentReader.cancel('用户手动停止');
+        }
+        this.resetChatUI();
     }
     
     addMessageToChat(role, content, timestamp = null, sources = null) {
@@ -708,7 +1058,7 @@ class SparkLinkApp {
                 formData.append('file', file);
                 formData.append('knowledge_base_id', knowledgeBaseId);
                 
-                const response = await fetch('/api/v1/kb/documents/upload', {
+                const response = await fetch('/api/v1/knowledge_base/documents/upload', {
                     method: 'POST',
                     body: formData
                 });

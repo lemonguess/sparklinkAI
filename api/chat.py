@@ -1,16 +1,18 @@
 """聊天API路由"""
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import json
 import time
 import logging
-
+import uuid
+from models.enums import SearchStrategy
 from core.database import get_db
+from core.config import settings
 from models.schemas import (
     ChatRequest, ChatResponse, ChatSessionCreate, ChatSessionResponse,
-    ChatSessionDelete, ChatMessage, BaseResponse
+    ChatSessionDelete, ChatSessionUpdateTitle, ChatMessage, BaseResponse
 )
 from models.database import ChatSession, ChatMessage as DBChatMessage, User
 from services.chat_service import ChatService
@@ -20,11 +22,13 @@ from services.search_service import SearchService
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# 服务实例（将在请求中初始化）
+from core.shared_state import active_streams
+
+# 服务实例
 knowledge_service = KnowledgeService()
 search_service = SearchService()
 
-@router.post("/create-session", response_model=BaseResponse)
+@router.post("/create_session", response_model=BaseResponse)
 async def create_chat_session(
     session_data: ChatSessionCreate,
     db: Session = Depends(get_db)
@@ -66,7 +70,7 @@ async def get_chat_sessions(
         sessions = db.query(ChatSession).filter(
             ChatSession.user_id == user_id,
             ChatSession.is_active == True
-        ).offset(skip).limit(limit).all()
+        ).order_by(ChatSession.updated_at.desc()).offset(skip).limit(limit).all()
         
         session_responses = []
         for session in sessions:
@@ -92,15 +96,18 @@ async def delete_chat_session(
     request: ChatSessionDelete,
     db: Session = Depends(get_db)
 ):
-    """删除聊天会话（软删除）"""
+    """删除聊天会话（物理删除）"""
     try:
         # 检查会话是否存在
         session = db.query(ChatSession).filter(ChatSession.id == request.session_id).first()
         if not session:
             raise HTTPException(status_code=404, detail="会话不存在")
         
-        # 软删除会话（设置is_active为False）
-        session.is_active = False
+        # 物理删除：先删除会话相关的消息
+        db.query(DBChatMessage).filter(DBChatMessage.session_id == request.session_id).delete()
+        
+        # 再删除会话本身
+        db.delete(session)
         db.commit()
         
         return BaseResponse(
@@ -110,6 +117,38 @@ async def delete_chat_session(
         )
     except Exception as e:
         logger.error(f"删除会话失败: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/sessions/update_title", response_model=BaseResponse)
+async def update_session_title(
+    request: ChatSessionUpdateTitle,
+    db: Session = Depends(get_db)
+):
+    """修改会话标题"""
+    try:
+        # 查找会话
+        session = db.query(ChatSession).filter(ChatSession.id == request.session_id).first()
+        if not session:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        
+        # 更新标题
+        session.title = request.title
+        db.commit()
+        
+        return BaseResponse(
+            success=True,
+            message="会话标题修改成功",
+            data={
+                "session_id": session.id,
+                "title": session.title
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"修改会话标题失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/sessions/{session_id}/messages", response_model=BaseResponse)
@@ -126,11 +165,25 @@ async def get_chat_messages(
         if not session:
             raise HTTPException(status_code=404, detail="会话不存在")
         
+        # 优化查询：添加索引提示并限制返回字段
         messages = db.query(DBChatMessage).filter(
             DBChatMessage.session_id == session_id
-        ).order_by(DBChatMessage.created_at.asc()).offset(skip).limit(limit).all()
+        ).order_by(DBChatMessage.sequence_number.asc()).offset(skip).limit(limit).all()
         
-        message_responses = [ChatMessage.from_orm(msg) for msg in messages]
+        # 手动构建响应对象，避免ORM的额外开销
+        message_responses = []
+        for msg in messages:
+            message_responses.append(ChatMessage(
+                id=msg.id,
+                role=msg.role,
+                content=msg.content,
+                sequence_number=msg.sequence_number,
+                created_at=msg.created_at,
+                sources={
+                    'knowledge_sources': json.loads(msg.knowledge_sources) if msg.knowledge_sources else [],
+                    'web_search_results': json.loads(msg.web_search_results) if msg.web_search_results else []
+                } if (msg.knowledge_sources or msg.web_search_results) else None
+            ))
         
         return BaseResponse(
             success=True,
@@ -141,30 +194,51 @@ async def get_chat_messages(
         logger.error(f"获取消息列表失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/chat/stream")
+@router.post("/stream")
 async def chat_stream(
     request: ChatRequest,
     db: Session = Depends(get_db)
 ):
     """流式聊天接口"""
+    request_id = uuid.uuid4().hex
+    active_streams[request_id] = {"cancelled": False}
+
     async def generate():
         try:
+            # 发送请求ID
+            yield f"data: {json.dumps({'type': 'request_id', 'request_id': request_id}, ensure_ascii=False)}\n\n"
+
             start_time = time.time()
             
             # 初始化ChatService
             chat_service = ChatService(db=db)
             
-            # 如果没有提供session_id，创建新会话
+            # 检查session_id是否提供
             if not request.session_id:
-                user_id = 1  # 临时硬编码
-                session = ChatSession(
+                yield f"data: {json.dumps({'error': '请先创建会话'}, ensure_ascii=False)}\n\n"
+                return
+            
+            # 处理新会话创建
+            first_chat = False
+            if getattr(request, 'is_first', False) or getattr(request, 'newsession', False):
+                # 创建新会话，使用前端传入的session_id
+                user_id = request.user_id if request.user_id else settings.default_user_id
+                session_title = request.session_name if request.session_name else '新对话'
+                
+                new_session = ChatSession(
+                    id=request.session_id,  # 使用前端传入的UUID
                     user_id=user_id,
-                    title=request.message[:50] + "..." if len(request.message) > 50 else request.message
+                    title=session_title
                 )
-                db.add(session)
+                db.add(new_session)
                 db.commit()
-                db.refresh(session)
-                session_id = session.id
+                db.refresh(new_session)
+                session_id = new_session.id
+                session = new_session
+                first_chat = True
+                
+                # 发送会话信息给前端
+                yield f"data: {json.dumps({'type': 'session_info', 'session_id': session_id, 'session_name': session_title}, ensure_ascii=False)}\n\n"
             else:
                 session_id = request.session_id
                 session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
@@ -172,71 +246,82 @@ async def chat_stream(
                     yield f"data: {json.dumps({'error': '会话不存在'}, ensure_ascii=False)}\n\n"
                     return
             
-            # 处理知识库和联网搜索
-            knowledge_sources = []
-            web_search_results = []
-            
-            if request.use_knowledge_base:
-                try:
-                    kb_results = await knowledge_service.search(
-                        query=request.message,
-                        top_k=10
-                    )
-                    knowledge_sources = kb_results
-                except Exception as e:
-                    logger.warning(f"知识库搜索失败: {e}")
-            
-            if request.use_web_search:
-                should_web_search = (
-                    len(knowledge_sources) < 3 or
-                    (knowledge_sources and max([r.get('score', 0) for r in knowledge_sources]) < 0.8)
-                )
-                
-                if should_web_search:
-                    try:
-                        web_results = await search_service.web_search(
-                            query=request.message,
-                            max_results=5
-                        )
-                        web_search_results = web_results
-                    except Exception as e:
-                        logger.warning(f"联网搜索失败: {e}")
-            
+
             # 发送开始信号
             yield f"data: {json.dumps({'type': 'start', 'session_id': session_id}, ensure_ascii=False)}\n\n"
             
-            # 流式生成回复
-            full_response = ""
-            async for chunk in chat_service.generate_stream_response(
-                message=request.message,
-                knowledge_sources=knowledge_sources,
-                web_search_results=web_search_results,
-                session_id=session_id
-            ):
-                full_response += chunk
-                yield f"data: {json.dumps({'type': 'content', 'content': chunk}, ensure_ascii=False)}\n\n"
+            # 如果是第一次对话，立即生成并发送标题
+            if first_chat:
+                try:
+                    # 基于用户输入快速生成标题
+                    new_title = await chat_service.generate_session_title_from_input(request.message)
+                    session.title = new_title
+                    db.commit()
+                    
+                    # 通过 SSE 发送标题更新事件
+                    yield f"data: {json.dumps({'type': 'title', 'title': new_title, 'session_id': session_id}, ensure_ascii=False)}\n\n"
+                    logger.info(f"🏷️ 即时生成会话标题: {new_title}")
+                except Exception as e:
+                    logger.error(f"即时生成标题失败: {e}")
             
-            # 使用ChatService保存对话历史（同时保存到MySQL和Redis）
-            await chat_service.save_conversation_history(
-                session_id=session_id,
-                user_message=request.message,
-                assistant_message=full_response,
-                knowledge_sources=knowledge_sources,
-                web_search_results=web_search_results
-            )
+            # 使用intelligent_chat进行流式生成
+            full_response = ""
+            was_cancelled = False
+            
+            try:
+                async for chunk in await chat_service.intelligent_chat(
+                    message=request.message,
+                    session_id=session_id,
+                    stream=True
+                ):
+                    full_response += chunk
+                    yield f"data: {json.dumps({'type': 'content', 'content': chunk}, ensure_ascii=False)}\n\n"
+                    
+                    # 检查是否被取消
+                    if request_id in active_streams and active_streams[request_id].get('cancelled', False):
+                        was_cancelled = True
+                        logger.info(f"🛑 检测到流式响应被取消，已生成内容长度: {len(full_response)}")
+                        break
+            except Exception as e:
+                logger.error(f"流式生成过程中出错: {e}")
+                if not full_response:
+                    full_response = "抱歉，生成回复时出现错误。"
+            
+            # 处理保存逻辑
+            if was_cancelled:
+                # 如果被取消，使用ChatService的中断处理方法
+                await chat_service.handle_stream_interruption(
+                    request_id=request_id,
+                    session_id=session_id,
+                    user_message=request.message,
+                    partial_response=full_response
+                )
+            elif full_response.strip():  # 正常完成且有内容
+                try:
+                    await chat_service.save_conversation_history(
+                        session_id=session_id,
+                        user_message=request.message,
+                        assistant_message=full_response
+                    )
+                    logger.info(f"💾 已保存完整的对话记录，内容长度: {len(full_response)}")
+                except Exception as e:
+                    logger.error(f"保存对话历史失败: {e}")
             
             # 发送完成信号
             response_time = time.time() - start_time
             yield f"data: {json.dumps({
                 'type': 'end',
-                'response_time': response_time,
-                'knowledge_sources': knowledge_sources,
-                'web_search_results': web_search_results
+                'response_time': response_time
             }, ensure_ascii=False)}\n\n"
             
         except Exception as e:
             logger.error(f"流式聊天失败: {e}")
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            # 清理
+            if request_id in active_streams:
+                del active_streams[request_id]
+                logger.info(f"Cleaned up active stream for request_id: {request_id}")
     
     return StreamingResponse(
         generate(),
@@ -248,105 +333,20 @@ async def chat_stream(
         }
     )
 
-@router.post("/chat", response_model=BaseResponse)
-async def chat(
-    request: ChatRequest,
-    background_tasks: BackgroundTasks,
+@router.post("/stop", summary="停止流式生成")
+async def stop_stream(
+    request_id: str = Body(..., embed=True),
     db: Session = Depends(get_db)
 ):
-    """聊天接口（非流式）"""
-    try:
-        start_time = time.time()
-        
-        # 初始化ChatService
-        chat_service = ChatService(db=db)
-        
-        # 如果没有提供session_id，创建新会话
-        if not request.session_id:
-            # 这里简化处理，实际应该从认证中获取用户ID
-            user_id = 1  # 临时硬编码
-            session = ChatSession(
-                user_id=user_id,
-                title=request.message[:50] + "..." if len(request.message) > 50 else request.message
-            )
-            db.add(session)
-            db.commit()
-            db.refresh(session)
-            session_id = session.id
-        else:
-            session_id = request.session_id
-            session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-            if not session:
-                raise HTTPException(status_code=404, detail="会话不存在")
-        
-        # 处理聊天请求
-        knowledge_sources = []
-        web_search_results = []
-        
-        # 知识库搜索
-        if request.use_knowledge_base:
-            try:
-                kb_results = await knowledge_service.search(
-                    query=request.message,
-                    top_k=10
-                )
-                knowledge_sources = kb_results
-            except Exception as e:
-                logger.warning(f"知识库搜索失败: {e}")
-        
-        # 联网搜索（智能判断）
-        if request.use_web_search:
-            # 简单的智能判断逻辑：如果知识库结果不足或置信度低，则进行联网搜索
-            should_web_search = (
-                len(knowledge_sources) < 3 or
-                (knowledge_sources and max([r.get('score', 0) for r in knowledge_sources]) < 0.8)
-            )
-            
-            if should_web_search:
-                try:
-                    web_results = await search_service.web_search(
-                        query=request.message,
-                        max_results=5
-                    )
-                    web_search_results = web_results
-                except Exception as e:
-                    logger.warning(f"联网搜索失败: {e}")
-        
-        # 生成回复
-        try:
-            response_text = await chat_service.generate_response(
-                message=request.message,
-                knowledge_sources=knowledge_sources,
-                web_search_results=web_search_results,
-                session_id=session_id
-            )
-        except Exception as e:
-            logger.error(f"生成回复失败: {e}")
-            response_text = "抱歉，我现在无法处理您的请求，请稍后再试。"
-        
-        # 使用ChatService保存对话历史（同时保存到MySQL和Redis）
-        await chat_service.save_conversation_history(
-            session_id=session_id,
-            user_message=request.message,
-            assistant_message=response_text,
-            knowledge_sources=knowledge_sources,
-            web_search_results=web_search_results
-        )
-        
-        response_time = time.time() - start_time
-        
-        return BaseResponse(
-            success=True,
-            message="聊天成功",
-            data=ChatResponse(
-                message=response_text,
-                session_id=session_id,
-                knowledge_sources=knowledge_sources,
-                web_search_results=web_search_results,
-                response_time=response_time
-            )
-        )
-        
-    except Exception as e:
-        logger.error(f"聊天处理失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """停止一个正在进行的流式生成"""
+    if request_id not in active_streams:
+        raise HTTPException(status_code=404, detail="Request ID not found or stream already completed.")
+    
+    # 使用ChatService处理停止逻辑
+    chat_service = ChatService(db=db)
+    success = await chat_service.stop_stream_generation(request_id)
+    
+    if success:
+        return {"status": "stopping"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to stop stream generation.")

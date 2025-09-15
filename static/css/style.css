@@ -147,6 +147,64 @@ body {
     cursor: pointer;
     transition: all 0.2s ease;
     border-left: 3px solid transparent;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.session-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.session-actions {
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    margin-left: 8px;
+}
+
+.session-item:hover .session-actions {
+    opacity: 1;
+}
+
+.edit-title-btn,
+.delete-session-btn {
+    background: none;
+    border: none;
+    color: #95a5a6;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    font-size: 12px;
+    margin-left: 4px;
+}
+
+.edit-title-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #3498db;
+}
+
+.delete-session-btn:hover {
+    background: rgba(231, 76, 60, 0.1);
+    color: #e74c3c;
+}
+
+.session-title-input {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid #3498db;
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: white;
+    font-size: inherit;
+    font-weight: 500;
+    width: 100%;
+    outline: none;
+}
+
+.session-title-input:focus {
+    border-color: #2980b9;
+    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
 }
 
 .session-item:hover, .knowledge-item:hover {
@@ -262,6 +320,23 @@ body {
     background: linear-gradient(135deg, #2980b9, #1f4e79);
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    border: none;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+.btn-danger:hover {
+    background: linear-gradient(135deg, #c0392b, #a93226);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
 }
 
 /* 聊天消息区 */

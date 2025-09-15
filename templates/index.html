@@ -116,6 +116,9 @@
                         <button id="attachBtn" class="btn-icon" title="附件">
                             <i class="fas fa-paperclip"></i>
                         </button>
+                        <button id="stopBtn" class="btn-danger" title="停止生成" style="display: none;">
+                            <i class="fas fa-stop"></i>
+                        </button>
                         <button id="sendBtn" class="btn-primary" title="发送">
                             <i class="fas fa-paper-plane"></i>
                         </button>
@@ -123,12 +126,12 @@
                 </div>
                 <div class="input-options">
                     <label class="checkbox-wrapper">
-                        <input type="checkbox" id="useKnowledgeBase" checked>
+                        <input type="checkbox" id="useKnowledgeBase">
                         <span class="checkmark"></span>
                         使用知识库
                     </label>
                     <label class="checkbox-wrapper">
-                        <input type="checkbox" id="useWebSearch">
+                        <input type="checkbox" id="useWebSearch" checked>
                         <span class="checkmark"></span>
                         联网搜索
                     </label>

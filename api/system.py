@@ -10,6 +10,7 @@ from core.database import get_db, db_manager
 from core.config import settings
 from models.schemas import BaseResponse, SystemStatus, ModelConfig, KnowledgeBaseConfig, SearchConfig
 from models.database import ChatSession, Document, DocumentChunk
+from services.vector_service import VectorService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -28,8 +29,13 @@ async def get_system_status(db: Session = Depends(get_db)):
         database_status = "healthy" if db_manager.test_connection() else "unhealthy"
         redis_status = "healthy" if db_manager.test_redis_connection() else "unhealthy"
         
-        # Milvus状态检查（简化）
-        milvus_status = "unknown"  # 实际项目中需要实现Milvus连接检查
+        # Milvus状态检查
+        vector_service = VectorService()
+        try:
+            milvus_status = "healthy" if vector_service.test_connection_sync() else "unhealthy"
+        except Exception as e:
+            logger.warning(f"Milvus状态检查失败: {e}")
+            milvus_status = "unhealthy"
         
         # Celery状态检查（简化）
         celery_status = "unknown"  # 实际项目中需要实现Celery状态检查
@@ -137,7 +143,7 @@ async def get_model_config():
         logger.error(f"获取模型配置失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/config/knowledge-base", response_model=BaseResponse)
+@router.get("/config/knowledge_base", response_model=BaseResponse)
 async def get_knowledge_base_config():
     """获取知识库配置"""
     try:

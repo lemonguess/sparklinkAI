@@ -37,7 +37,7 @@ ALLOWED_FILE_TYPES = {
     'image/gif': '.gif'
 }
 
-@router.post("/knowledge-bases", response_model=BaseResponse)
+@router.post("/knowledge_bases", response_model=BaseResponse)
 async def create_knowledge_base(
     kb_data: KnowledgeBaseCreate,
     db: Session = Depends(get_db)
@@ -75,7 +75,7 @@ async def create_knowledge_base(
         logger.error(f"创建知识库失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/knowledge-bases", response_model=BaseResponse)
+@router.get("/knowledge_bases", response_model=BaseResponse)
 async def get_knowledge_bases(
     skip: int = 0,
     limit: int = 20,
@@ -101,7 +101,7 @@ async def get_knowledge_bases(
 @router.post("/documents/upload", response_model=BaseResponse)
 async def upload_document(
     file: UploadFile = File(...),
-    user_id: str = Form("1"),  # 从表单参数获取用户ID
+    user_id: str = Form(""),  # 从表单参数获取用户ID，空字符串表示使用默认用户
     background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db)
 ):
@@ -132,9 +132,12 @@ async def upload_document(
             content = await file.read()
             buffer.write(content)
         
+        # 处理user_id，如果为空则使用默认用户ID
+        actual_user_id = user_id if user_id else settings.default_user_id
+        
         # 创建文档记录
         document = Document(
-            user_id=user_id,
+            user_id=actual_user_id,
             filename=unique_filename,
             original_filename=file.filename,
             file_path=file_path,
@@ -164,7 +167,7 @@ async def upload_document(
 
 @router.get("/documents", response_model=BaseResponse)
 async def get_documents(
-    user_id: str = "1",  # 临时硬编码
+    user_id: str = "",  # 空字符串表示使用默认用户
     skip: int = 0,
     limit: int = 20,
     status: Optional[str] = None,
@@ -172,7 +175,9 @@ async def get_documents(
 ):
     """获取文档列表"""
     try:
-        query = db.query(Document).filter(Document.user_id == user_id)
+        # 处理user_id，如果为空则使用默认用户ID
+        actual_user_id = user_id if user_id else settings.default_user_id
+        query = db.query(Document).filter(Document.user_id == actual_user_id)
         
         if status:
             query = query.filter(Document.status == status)
@@ -303,7 +308,7 @@ async def search_knowledge_base(
         logger.error(f"知识库搜索失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/knowledge-bases/{kb_id}", response_model=BaseResponse)
+@router.delete("/knowledge_bases/{kb_id}", response_model=BaseResponse)
 async def delete_knowledge_base(
     kb_id: int,
     db: Session = Depends(get_db)

@@ -132,8 +132,6 @@ class SearchService:
                             "title": item.get("name", ""),
                             "content": item.get("snippet", ""),
                             "url": item.get("url", ""),
-                            "source": "bocha_search",
-                            "score": 0.8,  # 博查API不直接提供相关性分数
                             "site_name": item.get("siteName", ""),
                             "site_icon": item.get("siteIcon", ""),
                             "published_date": item.get("datePublished", "")
@@ -323,41 +321,6 @@ class SearchService:
                 "total_results": 0,
                 "error": str(e)
             }
-    
-    def filter_and_rank_results(
-        self,
-        knowledge_results: List[Dict[str, Any]],
-        web_results: List[Dict[str, Any]],
-        max_results: int = 10
-    ) -> List[Dict[str, Any]]:
-        """过滤和排序搜索结果"""
-        try:
-            all_results = []
-            
-            # 添加知识库结果（给予更高权重）
-            for result in knowledge_results:
-                result_copy = result.copy()
-                result_copy["final_score"] = result.get("score", 0) * 1.2  # 知识库结果权重提升
-                all_results.append(result_copy)
-            
-            # 添加网络搜索结果
-            for result in web_results:
-                result_copy = result.copy()
-                result_copy["final_score"] = result.get("score", 0) * 1.0  # 网络结果保持原权重
-                all_results.append(result_copy)
-            
-            # 按最终得分排序
-            all_results.sort(key=lambda x: x.get("final_score", 0), reverse=True)
-            
-            # 去重（基于内容相似度）
-            unique_results = self._deduplicate_results(all_results)
-            
-            # 返回前N个结果
-            return unique_results[:max_results]
-            
-        except Exception as e:
-            logger.error(f"过滤和排序结果失败: {e}")
-            return (knowledge_results + web_results)[:max_results]
     
     def _deduplicate_results(
         self,

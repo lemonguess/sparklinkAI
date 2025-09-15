@@ -135,6 +135,26 @@ class Settings:
         if self.REDIS_PASSWORD:
             return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.CELERY_RESULT_DB}"
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.CELERY_RESULT_DB}"
+    
+    @property
+    def default_username(self) -> str:
+        """获取默认用户名"""
+        return self.config.get('default_user', 'username', fallback='admin')
+    
+    @property
+    def default_email(self) -> str:
+        """获取默认用户邮箱"""
+        return self.config.get('default_user', 'email', fallback='admin@sparklinkai.com')
+    
+    @property
+    def default_user_active(self) -> bool:
+        """获取默认用户激活状态"""
+        return self.config.getboolean('default_user', 'is_active', fallback=True)
+    
+    @property
+    def default_user_id(self) -> str:
+        """获取默认用户ID"""
+        return self.config.get('default_user', 'id', fallback='admin123456789abcdef0123456789abcdef')
 
 # 全局配置实例
 settings = Settings()
