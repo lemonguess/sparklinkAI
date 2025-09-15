@@ -4,13 +4,15 @@
 
 ## 🌟 主要特性
 
-- **智能对话**: 基于 DeepSeek-R1 模型的高质量对话生成
+- **智能对话**: 基于大语言模型的高质量对话生成
 - **知识库增强**: 支持文档上传、解析、向量化和智能检索
 - **联网搜索**: 智能判断模式，知识库不足时自动联网搜索
 - **流式响应**: 支持 SSE 流式对话，提供实时交互体验
 - **异步处理**: 使用 Celery 处理文档解析和向量生成任务
 - **多格式支持**: 支持 PDF、Word、PPT、图片等多种文档格式
 - **PocketFlow框架**: 智能搜索策略，动态决策最优搜索方案
+- **用户会话管理**: 支持多用户、多会话的聊天管理
+- **UUID用户系统**: 支持UUID格式的用户标识符
 
 ## 🏗️ 系统架构
 
@@ -39,14 +41,15 @@
 
 - Python 3.13+
 - MySQL 8.0+
-- Redis 7.2+
-- Milvus 2.4+ (可选)
+- Redis 5.0+
+- Milvus 2.4+ (可选，用于向量存储)
+- uv (Python 包管理器)
 
 ### 安装步骤
 
 1. **克隆项目**
 ```bash
-git clone <repository-url>
+git clone git@github.com:lemonguess/sparklinkAI.git
 cd sparklinkAI
 ```
 
@@ -58,10 +61,7 @@ uv sync
 
 3. **配置环境变量**
 ```bash
-# 复制环境变量模板
-cp .env.example .env
-
-# 编辑 .env 文件，填入你的 API 密钥
+# 创建 .env 文件，填入你的 API 密钥
 vim .env
 ```
 
@@ -137,9 +137,30 @@ curl -X POST "http://localhost:8000/api/v1/chat/chat" \
   -H "Content-Type: application/json" \
   -d '{
     "message": "你好，请介绍一下人工智能",
+    "user_id": "your-user-id",
+    "session_id": "your-session-id",
     "use_knowledge_base": true,
     "use_web_search": true,
     "stream": false
+  }'
+
+# 流式聊天
+curl -X POST "http://localhost:8000/api/v1/chat/chat/stream" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "你好，请介绍一下人工智能",
+    "user_id": "your-user-id",
+    "session_id": "your-session-id",
+    "use_knowledge_base": true,
+    "use_web_search": true
+  }'
+
+# 创建聊天会话
+curl -X POST "http://localhost:8000/api/v1/chat/create-session" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "your-user-id",
+    "title": "新的聊天会话"
   }'
 ```
 
@@ -148,7 +169,32 @@ curl -X POST "http://localhost:8000/api/v1/chat/chat" \
 ```bash
 # 上传文档到知识库
 curl -X POST "http://localhost:8000/api/v1/kb/documents/upload" \
-  -F "file=@document.pdf"
+  -F "file=@document.pdf" \
+  -F "user_id=your-user-id"
+
+# 获取文档列表
+curl -X GET "http://localhost:8000/api/v1/kb/documents?user_id=your-user-id&skip=0&limit=20"
+
+# 获取单个文档信息
+curl -X GET "http://localhost:8000/api/v1/kb/documents/1"
+
+# 删除文档
+curl -X DELETE "http://localhost:8000/api/v1/kb/documents/1"
+```
+
+### 知识库管理
+
+```bash
+# 创建知识库
+curl -X POST "http://localhost:8000/api/v1/kb/knowledge-bases" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "我的知识库",
+    "description": "用于存储相关文档的知识库"
+  }'
+
+# 获取知识库列表
+curl -X GET "http://localhost:8000/api/v1/kb/knowledge-bases?skip=0&limit=20"
 ```
 
 ### 知识库搜索
@@ -160,7 +206,8 @@ curl -X POST "http://localhost:8000/api/v1/kb/search" \
   -d '{
     "query": "人工智能的发展历史",
     "top_k": 10,
-    "similarity_threshold": 0.7
+    "similarity_threshold": 0.7,
+    "collection_name": "kb_12345678"
   }'
 ```
 
@@ -222,14 +269,22 @@ curl http://localhost:8000/health
 
 # 检查系统信息
 curl http://localhost:8000/api/v1/system/status
+
+# 获取系统统计信息
+curl http://localhost:8000/api/v1/system/stats
+
+# 检查数据库连接
+curl http://localhost:8000/api/v1/system/db-status
 ```
 
 ### 性能指标
 
-- 响应时间监控
+- 响应时间监控（通过 X-Process-Time 头部）
 - 搜索质量评估
 - 资源使用统计
 - 任务执行状态
+- 数据库连接状态
+- Redis 连接状态
 
 ## 🔄 开发指南
 
@@ -237,44 +292,73 @@ curl http://localhost:8000/api/v1/system/status
 
 ```
 sparklinkAI/
-├── app/
-│   ├── api/                 # API 路由
-│   ├── core/                # 核心配置
-│   ├── models/              # 数据模型
-│   ├── services/            # 业务服务
-│   │   └── tasks/           # Celery 任务
-│   └── utils/               # 工具模块
+├── api/                     # API 路由
+│   ├── chat.py              # 聊天相关接口
+│   ├── knowledge_base.py    # 知识库相关接口
+│   └── system.py            # 系统相关接口
+├── core/                    # 核心配置
+│   ├── config.py            # 配置管理
+│   └── database.py          # 数据库连接
+├── models/                  # 数据模型
+│   ├── database.py          # 数据库模型
+│   └── schemas.py           # Pydantic 模型
+├── services/                # 业务服务
+│   ├── chat_service.py      # 聊天服务
+│   ├── document_service.py  # 文档处理服务
+│   ├── embedding_service.py # 嵌入向量服务
+│   ├── knowledge_service.py # 知识库服务
+│   ├── search_service.py    # 搜索服务
+│   ├── vector_service.py    # 向量数据库服务
+│   ├── celery_app.py        # Celery 应用配置
+│   └── tasks/               # Celery 任务
+│       ├── document_tasks.py    # 文档处理任务
+│       ├── embedding_tasks.py   # 嵌入向量任务
+│       └── search_tasks.py      # 搜索任务
 ├── config/                  # 配置文件
+│   └── conf.ini             # 系统配置
 ├── static/                  # 静态文件
+│   ├── css/                 # 样式文件
+│   ├── js/                  # JavaScript 文件
+│   └── libs/                # 第三方库
 ├── templates/               # 模板文件
-├── uploads/                 # 上传文件
+│   └── index.html           # 主页模板
+├── utils/                   # 工具模块
 ├── .env                     # 环境变量
 ├── main.py                  # 主程序入口
-└── celery_worker.py         # Celery Worker
+├── celery_worker.py         # Celery Worker
+├── pyproject.toml           # 项目依赖配置
+└── docker-compose.yml       # Docker 编排配置
 ```
 
 ### 添加新功能
 
 1. **添加新的API端点**
-   - 在 `app/api/` 下创建新的路由文件
-   - 在 `app/main.py` 中注册路由
+   - 在 `api/` 下创建新的路由文件
+   - 在 `main.py` 中注册路由
 
 2. **添加新的服务**
-   - 在 `app/services/` 下创建服务类
+   - 在 `services/` 下创建服务类
    - 实现业务逻辑和外部API调用
 
 3. **添加新的任务**
-   - 在 `app/services/tasks/` 下创建任务文件
+   - 在 `services/tasks/` 下创建任务文件
    - 使用 `@celery_app.task` 装饰器
 
-### 测试
+### 开发工具
 
 ```bash
-# 运行测试
+# 安装开发依赖
+uv add --dev pytest pytest-cov black isort
+
+# 代码格式化
+uv run black .
+uv run isort .
+
+# 运行测试（需要先安装pytest）
 uv run pytest
 
 # 测试覆盖率
-uv run pytest --cov=app
+uv run pytest --cov=.
 ```
 
 ## 🚀 部署
@@ -314,6 +398,10 @@ MIT License
 
 - [FastAPI](https://fastapi.tiangolo.com/) - 现代化的 Python Web 框架
 - [Celery](https://docs.celeryproject.org/) - 分布式任务队列
+- [SQLAlchemy](https://www.sqlalchemy.org/) - Python SQL 工具包和 ORM
+- [Redis](https://redis.io/) - 内存数据结构存储
+- [MySQL](https://www.mysql.com/) - 关系型数据库
 - [Milvus](https://milvus.io/) - 向量数据库
-- [SiliconFlow](https://siliconflow.cn/) - 嵌入模型服务
-- [DeepSeek](https://www.deepseek.com/) - 大语言模型
+- [PocketFlow](https://github.com/pocketflow/pocketflow) - 智能搜索框架
+- [uv](https://github.com/astral-sh/uv) - 极速 Python 包管理器
+- [SiliconFlow](https://siliconflow.cn/) - AI 模型服务平台
