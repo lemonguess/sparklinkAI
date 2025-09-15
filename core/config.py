@@ -15,10 +15,6 @@ class Settings:
         config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'config', 'conf.ini')
         self.config.read(config_path, encoding='utf-8')
     
-    # OpenAI配置
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    
     # SiliconFlow配置
     SILICONFLOW_API_KEY: str = os.getenv("SILICONFLOW_API_KEY", "")
     SILICONFLOW_BASE_URL: str = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
@@ -40,7 +36,7 @@ class Settings:
     REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
-    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    REDIS_CHAT_MEMORY_DB: int = int(os.getenv("REDIS_CHAT_MEMORY_DB", "0"))
     
     MILVUS_HOST: str = os.getenv("MILVUS_HOST", "localhost")
     MILVUS_PORT: int = int(os.getenv("MILVUS_PORT", "19530"))
@@ -54,8 +50,8 @@ class Settings:
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key")
     
     # Celery配置
-    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1")
-    CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/2")
+    CELERY_BROKER_DB: int = int(os.getenv("CELERY_BROKER_DB", "1"))
+    CELERY_RESULT_DB: int = int(os.getenv("CELERY_RESULT_DB", "2"))
     
     @property
     def chat_model(self) -> str:
@@ -121,10 +117,24 @@ class Settings:
     
     @property
     def redis_url(self) -> str:
-        """获取Redis连接URL"""
+        """获取Redis连接URL（用于聊天记忆缓存）"""
         if self.REDIS_PASSWORD:
-            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
-        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_CHAT_MEMORY_DB}"
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_CHAT_MEMORY_DB}"
+    
+    @property
+    def celery_broker_url(self) -> str:
+        """获取Celery Broker连接URL"""
+        if self.REDIS_PASSWORD:
+            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.CELERY_BROKER_DB}"
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.CELERY_BROKER_DB}"
+    
+    @property
+    def celery_result_backend(self) -> str:
+        """获取Celery Result Backend连接URL"""
+        if self.REDIS_PASSWORD:
+            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.CELERY_RESULT_DB}"
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.CELERY_RESULT_DB}"
 
 # 全局配置实例
 settings = Settings()

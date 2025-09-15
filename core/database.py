@@ -19,12 +19,12 @@ engine = create_engine(
 # 会话工厂
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Redis连接
+# Redis连接（用于聊天记忆缓存）
 redis_client = redis.Redis(
     host=settings.REDIS_HOST,
     port=settings.REDIS_PORT,
     password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
-    db=settings.REDIS_DB,
+    db=settings.REDIS_CHAT_MEMORY_DB,
     decode_responses=True
 )
 

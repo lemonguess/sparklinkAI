@@ -18,7 +18,7 @@ class UserCreate(BaseModel):
 
 class UserResponse(BaseModel):
     """用户响应模型"""
-    id: int
+    id: str
     username: str
     email: Optional[str]
     created_at: datetime
@@ -31,7 +31,7 @@ class UserResponse(BaseModel):
 class ChatRequest(BaseModel):
     """聊天请求模型"""
     message: str = Field(..., min_length=1, max_length=10000)
-    session_id: Optional[int] = None
+    session_id: Optional[str] = None
     use_knowledge_base: bool = True
     use_web_search: bool = True
     stream: bool = True
@@ -48,11 +48,11 @@ class ChatMessage(BaseModel):
 class ChatSessionCreate(BaseModel):
     """创建聊天会话请求模型"""
     title: str = Field(..., min_length=1, max_length=200)
-    user_id: int
+    user_id: str  # 用户ID改为字符串类型
 
 class ChatSessionResponse(BaseModel):
     """聊天会话响应模型"""
-    id: int
+    id: str
     title: str
     created_at: datetime
     updated_at: datetime
@@ -62,10 +62,14 @@ class ChatSessionResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class ChatSessionDelete(BaseModel):
+    """删除聊天会话请求模型"""
+    session_id: str
+
 class ChatResponse(BaseModel):
     """聊天响应模型"""
     message: str
-    session_id: int
+    session_id: str
     knowledge_sources: Optional[List[Dict[str, Any]]] = None
     web_search_results: Optional[List[Dict[str, Any]]] = None
     response_time: Optional[float] = None
@@ -75,7 +79,7 @@ class DocumentUpload(BaseModel):
     """文档上传请求模型"""
     filename: str
     file_type: str
-    user_id: int
+    user_id: str
 
 class DocumentResponse(BaseModel):
     """文档响应模型"""

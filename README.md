@@ -92,11 +92,7 @@ uv run python celery_worker.py
 ### .env 文件配置
 
 ```env
-# OpenAI API 配置
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_BASE_URL=https://api.openai.com/v1
-
-# SiliconFlow API 配置 (嵌入模型)
+# SiliconFlow API 配置 (主要LLM和嵌入模型)
 SILICONFLOW_API_KEY=your_siliconflow_api_key_here
 SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
 
@@ -190,18 +186,30 @@ PocketFlow 是本项目的核心智能搜索框架，实现了以下功能：
 ### 使用示例
 
 ```python
-from app.utils.pocketflow import pocket_flow, SearchStrategy
+from services.chat_service import ChatService, SearchStrategy
 
-# 智能搜索
-result = await pocket_flow.intelligent_search(
+# 创建聊天服务实例
+chat_service = ChatService()
+
+# 方式1: 智能搜索
+result = await chat_service.intelligent_search(
     query="人工智能的最新发展",
-    strategy=SearchStrategy.INTELLIGENT,
+    strategy=SearchStrategy.AUTO,
     max_results=10
 )
 
 print(f"搜索策略: {result['strategy']}")
 print(f"决策原因: {result['decision_reasoning']}")
 print(f"结果数量: {result['total_results_count']}")
+print(f"使用框架: {result['performance_metrics']['framework']}")
+
+# 方式2: 智能聊天（自动搜索+生成回复）
+response = await chat_service.intelligent_chat(
+    message="请介绍人工智能的最新发展",
+    strategy=SearchStrategy.AUTO
+)
+
+print(f"AI回复: {response}")
 ```
 
 ## 📊 系统监控

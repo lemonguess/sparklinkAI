@@ -1,5 +1,5 @@
 """知识库API路由"""
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Form
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
@@ -101,7 +101,7 @@ async def get_knowledge_bases(
 @router.post("/documents/upload", response_model=BaseResponse)
 async def upload_document(
     file: UploadFile = File(...),
-    user_id: int = 1,  # 临时硬编码，实际应从认证中获取
+    user_id: str = Form("1"),  # 从表单参数获取用户ID
     background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db)
 ):
@@ -164,7 +164,7 @@ async def upload_document(
 
 @router.get("/documents", response_model=BaseResponse)
 async def get_documents(
-    user_id: int = 1,  # 临时硬编码
+    user_id: str = "1",  # 临时硬编码
     skip: int = 0,
     limit: int = 20,
     status: Optional[str] = None,

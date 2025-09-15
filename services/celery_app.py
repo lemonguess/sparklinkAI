@@ -5,8 +5,8 @@ from core.config import settings
 # 创建Celery应用
 celery_app = Celery(
     "sparklinkai",
-    broker=f'redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/6',
-    backend=f'redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/5',
+    broker=settings.celery_broker_url,
+    backend=settings.celery_result_backend,
     include=[
         "app.services.tasks.document_tasks",
         "app.services.tasks.embedding_tasks",
@@ -16,8 +16,8 @@ celery_app = Celery(
 
 # Celery配置
 celery_app.conf.update(
-    broker_url=f'redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/6',
-    result_backend=f'redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/5',
+    broker_url=settings.celery_broker_url,
+    result_backend=settings.celery_result_backend,
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",

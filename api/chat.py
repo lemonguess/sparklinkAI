@@ -10,7 +10,7 @@ import logging
 from core.database import get_db
 from models.schemas import (
     ChatRequest, ChatResponse, ChatSessionCreate, ChatSessionResponse,
-    ChatMessage, BaseResponse
+    ChatSessionDelete, ChatMessage, BaseResponse
 )
 from models.database import ChatSession, ChatMessage as DBChatMessage, User
 from services.chat_service import ChatService
@@ -20,12 +20,11 @@ from services.search_service import SearchService
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# 服务实例
-chat_service = ChatService()
+# 服务实例（将在请求中初始化）
 knowledge_service = KnowledgeService()
 search_service = SearchService()
 
-@router.post("/sessions", response_model=BaseResponse)
+@router.post("/create-session", response_model=BaseResponse)
 async def create_chat_session(
     session_data: ChatSessionCreate,
     db: Session = Depends(get_db)
@@ -57,7 +56,7 @@ async def create_chat_session(
 
 @router.get("/sessions", response_model=BaseResponse)
 async def get_chat_sessions(
-    user_id: int,
+    user_id: str,
     skip: int = 0,
     limit: int = 20,
     db: Session = Depends(get_db)
@@ -88,9 +87,34 @@ async def get_chat_sessions(
         logger.error(f"获取会话列表失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/sessions/delete", response_model=BaseResponse)
+async def delete_chat_session(
+    request: ChatSessionDelete,
+    db: Session = Depends(get_db)
+):
+    """删除聊天会话（软删除）"""
+    try:
+        # 检查会话是否存在
+        session = db.query(ChatSession).filter(ChatSession.id == request.session_id).first()
+        if not session:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        
+        # 软删除会话（设置is_active为False）
+        session.is_active = False
+        db.commit()
+        
+        return BaseResponse(
+            success=True,
+            message="会话删除成功",
+            data={"session_id": request.session_id}
+        )
+    except Exception as e:
+        logger.error(f"删除会话失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/sessions/{session_id}/messages", response_model=BaseResponse)
 async def get_chat_messages(
-    session_id: int,
+    session_id: str,
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db)
@@ -127,6 +151,9 @@ async def chat_stream(
         try:
             start_time = time.time()
             
+            # 初始化ChatService
+            chat_service = ChatService(db=db)
+            
             # 如果没有提供session_id，创建新会话
             if not request.session_id:
                 user_id = 1  # 临时硬编码
@@ -144,17 +171,6 @@ async def chat_stream(
                 if not session:
                     yield f"data: {json.dumps({'error': '会话不存在'}, ensure_ascii=False)}\n\n"
                     return
-            
-            # 保存用户消息
-            user_message = DBChatMessage(
-                session_id=session_id,
-                role="user",
-                content=request.message,
-                use_knowledge_base=request.use_knowledge_base,
-                use_web_search=request.use_web_search
-            )
-            db.add(user_message)
-            db.commit()
             
             # 处理知识库和联网搜索
             knowledge_sources = []
@@ -200,16 +216,14 @@ async def chat_stream(
                 full_response += chunk
                 yield f"data: {json.dumps({'type': 'content', 'content': chunk}, ensure_ascii=False)}\n\n"
             
-            # 保存助手消息
-            assistant_message = DBChatMessage(
+            # 使用ChatService保存对话历史（同时保存到MySQL和Redis）
+            await chat_service.save_conversation_history(
                 session_id=session_id,
-                role="assistant",
-                content=full_response,
-                knowledge_sources=json.dumps(knowledge_sources, ensure_ascii=False) if knowledge_sources else None,
-                web_search_results=json.dumps(web_search_results, ensure_ascii=False) if web_search_results else None
+                user_message=request.message,
+                assistant_message=full_response,
+                knowledge_sources=knowledge_sources,
+                web_search_results=web_search_results
             )
-            db.add(assistant_message)
-            db.commit()
             
             # 发送完成信号
             response_time = time.time() - start_time
@@ -244,6 +258,9 @@ async def chat(
     try:
         start_time = time.time()
         
+        # 初始化ChatService
+        chat_service = ChatService(db=db)
+        
         # 如果没有提供session_id，创建新会话
         if not request.session_id:
             # 这里简化处理，实际应该从认证中获取用户ID
@@ -261,17 +278,6 @@ async def chat(
             session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
             if not session:
                 raise HTTPException(status_code=404, detail="会话不存在")
-        
-        # 保存用户消息
-        user_message = DBChatMessage(
-            session_id=session_id,
-            role="user",
-            content=request.message,
-            use_knowledge_base=request.use_knowledge_base,
-            use_web_search=request.use_web_search
-        )
-        db.add(user_message)
-        db.commit()
         
         # 处理聊天请求
         knowledge_sources = []
@@ -318,16 +324,14 @@ async def chat(
             logger.error(f"生成回复失败: {e}")
             response_text = "抱歉，我现在无法处理您的请求，请稍后再试。"
         
-        # 保存助手回复
-        assistant_message = DBChatMessage(
+        # 使用ChatService保存对话历史（同时保存到MySQL和Redis）
+        await chat_service.save_conversation_history(
             session_id=session_id,
-            role="assistant",
-            content=response_text,
-            knowledge_sources=json.dumps(knowledge_sources, ensure_ascii=False) if knowledge_sources else None,
-            web_search_results=json.dumps(web_search_results, ensure_ascii=False) if web_search_results else None
+            user_message=request.message,
+            assistant_message=response_text,
+            knowledge_sources=knowledge_sources,
+            web_search_results=web_search_results
         )
-        db.add(assistant_message)
-        db.commit()
         
         response_time = time.time() - start_time
         
@@ -345,63 +349,4 @@ async def chat(
         
     except Exception as e:
         logger.error(f"聊天处理失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/chat/stream")
-async def chat_stream(
-    request: ChatRequest,
-    db: Session = Depends(get_db)
-):
-    """流式聊天接口"""
-    async def generate_stream():
-        try:
-            # 类似非流式的处理逻辑，但返回流式响应
-            yield f"data: {json.dumps({'type': 'start', 'message': '开始处理您的请求...'}, ensure_ascii=False)}\n\n"
-            
-            # 这里应该实现真正的流式生成逻辑
-            # 暂时返回简单的模拟响应
-            response_text = "这是一个模拟的流式响应。在实际实现中，这里会调用真正的LLM API进行流式生成。"
-            
-            for i, char in enumerate(response_text):
-                yield f"data: {json.dumps({'type': 'content', 'content': char}, ensure_ascii=False)}\n\n"
-                # 模拟延迟
-                import asyncio
-                await asyncio.sleep(0.05)
-            
-            yield f"data: {json.dumps({'type': 'end', 'message': '响应完成'}, ensure_ascii=False)}\n\n"
-            
-        except Exception as e:
-            logger.error(f"流式聊天失败: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
-    
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
-    )
-
-@router.delete("/sessions/{session_id}", response_model=BaseResponse)
-async def delete_chat_session(
-    session_id: int,
-    db: Session = Depends(get_db)
-):
-    """删除聊天会话"""
-    try:
-        session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-        if not session:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        # 软删除
-        session.is_active = False
-        db.commit()
-        
-        return BaseResponse(
-            success=True,
-            message="会话删除成功"
-        )
-    except Exception as e:
-        logger.error(f"删除会话失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))

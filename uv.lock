@@ -511,6 +511,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pocketflow"
+version = "0.0.3"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/22/96/2e15fa9d94329032d034337210bd6cc9d060eed59eb0b24dcb1375c0f2ec/pocketflow-0.0.3.tar.gz", hash = "sha256:afadc1c44658bf811668a789dee7053ed654d021c861c58696a2cb6bc4775133", size = 19463 }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/00/5e/1f27d937a4983c8783d9255c4880e9b8a5a1774ebc4eb55d4c3f3d112d6b/pocketflow-0.0.3-py3-none-any.whl", hash = "sha256:028795ae5db00f421c97036f7cd5e89fe0654bef2a03032c84fcf6f61a292962", size = 4484 },
+]
+
+[[package]]
 name = "prompt-toolkit"
 version = "3.0.52"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -739,6 +748,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "numpy" },
     { name = "openai" },
+    { name = "pocketflow" },
     { name = "psutil" },
     { name = "pymilvus" },
     { name = "pymysql" },
@@ -758,6 +768,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "numpy", specifier = ">=2.3.3" },
     { name = "openai", specifier = ">=1.107.2" },
+    { name = "pocketflow", specifier = ">=0.0.3" },
     { name = "psutil", specifier = ">=7.0.0" },
     { name = "pymilvus", specifier = ">=2.6.1" },
     { name = "pymysql", specifier = ">=1.1.2" },
