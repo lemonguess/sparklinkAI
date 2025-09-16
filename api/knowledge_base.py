@@ -13,15 +13,18 @@ from models.schemas import (
     BaseResponse, TaskStatus
 )
 from models.database import Document, KnowledgeBase, User
-from services.knowledge_service import KnowledgeService
 from services.document_service import DocumentService
+from services.search_service import SearchService
+from services.vector_service import VectorService
+from services.tasks.embedding_tasks import process_document_task
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # 服务实例
-knowledge_service = KnowledgeService()
 document_service = DocumentService()
+search_service = SearchService()
+vector_service = VectorService()
 
 # 允许的文件类型
 ALLOWED_FILE_TYPES = {
@@ -62,7 +65,7 @@ async def create_knowledge_base(
         
         # 在Milvus中创建集合
         try:
-            await knowledge_service.create_collection(collection_name)
+            await vector_service.create_collection(collection_name)
         except Exception as e:
             logger.warning(f"创建Milvus集合失败: {e}")
         
@@ -235,7 +238,10 @@ async def delete_document(
         
         # 删除向量数据（如果存在）
         try:
-            await knowledge_service.delete_document_vectors(document_id)
+            await vector_service.delete_vectors(
+                collection_name="sparklinkai_knowledge",
+                vector_ids=[f"doc_{document_id}"]
+            )
         except Exception as e:
             logger.warning(f"删除向量数据失败: {e}")
         
@@ -288,7 +294,7 @@ async def search_knowledge_base(
 ):
     """搜索知识库"""
     try:
-        results = await knowledge_service.search(
+        results = await search_service.search(
             query=query,
             top_k=top_k,
             similarity_threshold=similarity_threshold,
@@ -325,7 +331,7 @@ async def delete_knowledge_base(
         
         # 删除Milvus集合
         try:
-            await knowledge_service.drop_collection(kb.collection_name)
+            await vector_service.drop_collection(kb.collection_name)
         except Exception as e:
             logger.warning(f"删除Milvus集合失败: {e}")
         

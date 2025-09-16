@@ -16,7 +16,6 @@ from models.schemas import (
 )
 from models.database import ChatSession, ChatMessage as DBChatMessage, User
 from services.chat_service import ChatService
-from services.knowledge_service import KnowledgeService
 from services.search_service import SearchService
 
 router = APIRouter()
@@ -25,7 +24,6 @@ logger = logging.getLogger(__name__)
 from core.shared_state import active_streams
 
 # 服务实例
-knowledge_service = KnowledgeService()
 search_service = SearchService()
 
 @router.post("/create_session", response_model=BaseResponse)

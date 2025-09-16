@@ -69,41 +69,6 @@ class VectorService:
             self._connected = False
             return False
     
-    def connect_sync(self) -> bool:
-        """同步连接到Milvus"""
-        if not MILVUS_AVAILABLE:
-            logger.error("Milvus客户端未安装")
-            return False
-        
-        try:
-            # 连接配置
-            connect_params = {
-                "host": self.host,
-                "port": self.port
-            }
-            
-            if self.user and self.password:
-                connect_params.update({
-                    "user": self.user,
-                    "password": self.password
-                })
-            
-            # 建立连接
-            connections.connect(
-                alias="default",
-                **connect_params
-            )
-            
-            self._connected = True
-            logger.info(f"Milvus连接成功: {self.host}:{self.port}")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Milvus连接失败: {e}")
-            self._connected = False
-            return False
-    
     async def create_collection(
         self,
         collection_name: str,
@@ -136,27 +101,58 @@ class VectorService:
                     auto_id=False
                 ),
                 FieldSchema(
-                    name="embedding",
-                    dtype=DataType.FLOAT_VECTOR,
-                    dim=dimension
+                    name="doc_id",
+                    dtype=DataType.VARCHAR,
+                    max_length=200
+                ),
+                FieldSchema(
+                    name="title",
+                    dtype=DataType.VARCHAR,
+                    max_length=500
+                ),
+                FieldSchema(
+                    name="source_path",
+                    dtype=DataType.VARCHAR,
+                    max_length=1000
                 ),
                 FieldSchema(
                     name="chunk_id",
                     dtype=DataType.INT64
                 ),
                 FieldSchema(
-                    name="document_id",
-                    dtype=DataType.INT64
+                    name="create_at",
+                    dtype=DataType.VARCHAR,
+                    max_length=20
+                ),
+                FieldSchema(
+                    name="update_at",
+                    dtype=DataType.VARCHAR,
+                    max_length=20
                 ),
                 FieldSchema(
                     name="content",
                     dtype=DataType.VARCHAR,
-                    max_length=2000
+                    max_length=4000
                 ),
                 FieldSchema(
-                    name="metadata",
+                    name="content_vector",
+                    dtype=DataType.FLOAT_VECTOR,
+                    dim=dimension
+                ),
+                FieldSchema(
+                    name="type_name",
                     dtype=DataType.VARCHAR,
-                    max_length=1000
+                    max_length=50
+                ),
+                FieldSchema(
+                    name="auther_name",
+                    dtype=DataType.VARCHAR,
+                    max_length=200
+                ),
+                FieldSchema(
+                    name="user_id",
+                    dtype=DataType.VARCHAR,
+                    max_length=50
                 )
             ]
             
@@ -178,9 +174,9 @@ class VectorService:
                 "index_type": "IVF_FLAT",
                 "params": {"nlist": 1024}
             }
-            
+
             collection.create_index(
-                field_name="embedding",
+                field_name="content_vector",
                 index_params=index_params
             )
             
@@ -201,22 +197,48 @@ class VectorService:
         self,
         collection_name: str,
         vector_id: str,
-        embedding: List[float],
-        metadata: Dict[str, Any]
+        doc_id: str,
+        title: str,
+        source_path: str,
+        chunk_id: int,
+        create_at: str,
+        update_at: str,
+        content: str,
+        content_vector: List[float],
+        type_name: str,
+        auther_name: str,
+        user_id: str = None
     ) -> bool:
         """插入向量"""
-        return self.insert_vector_sync(collection_name, vector_id, embedding, metadata)
+        # 如果没有提供user_id，使用默认值
+        if user_id is None:
+            user_id = settings.default_user_id
+            
+        return await self.insert_vector_async(
+            collection_name, vector_id, doc_id, title, source_path, chunk_id,
+            create_at, update_at, content, content_vector, type_name,
+            auther_name, user_id
+        )
     
-    def insert_vector_sync(
+    async def insert_vector_async(
         self,
         collection_name: str,
         vector_id: str,
-        embedding: List[float],
-        metadata: Dict[str, Any]
+        doc_id: str,
+        title: str,
+        source_path: str,
+        chunk_id: int,
+        create_at: str,
+        update_at: str,
+        content: str,
+        content_vector: List[float],
+        type_name: str,
+        auther_name: str,
+        user_id: str
     ) -> bool:
-        """插入向量（同步）"""
+        """插入向量（异步）"""
         if not self._connected:
-            self.connect_sync()
+            await self.connect()
         
         if not MILVUS_AVAILABLE or not self._connected:
             logger.error("Milvus未连接")
@@ -227,23 +249,43 @@ class VectorService:
             if collection_name not in self._collections:
                 if not utility.has_collection(collection_name):
                     # 集合不存在，创建它
-                    import asyncio
-                    asyncio.create_task(self.create_collection(collection_name))
-                    return False
-                
-                collection = Collection(collection_name)
-                self._collections[collection_name] = collection
-            else:
-                collection = self._collections[collection_name]
+                    await self.create_collection(collection_name)
+                    if collection_name not in self._collections:
+                        return False
+                else:
+                    collection = Collection(collection_name)
+                    self._collections[collection_name] = collection
+            
+            collection = self._collections[collection_name]
+            
+            # 检查是否存在相同doc_id的数据，如果存在则先删除
+            if doc_id:
+                try:
+                    # 查询是否存在相同doc_id的数据
+                    expr = f'doc_id == "{doc_id}"'
+                    existing_results = collection.query(expr=expr, output_fields=["id"])
+                    if existing_results:
+                        # 删除现有数据
+                        existing_ids = [result["id"] for result in existing_results]
+                        collection.delete(expr=f'id in {existing_ids}')
+                        logger.info(f"删除了 {len(existing_ids)} 条相同doc_id的数据: {doc_id}")
+                except Exception as e:
+                    logger.warning(f"删除相同doc_id数据时出错: {e}")
             
             # 准备数据
             data = [
                 [vector_id],  # id
-                [embedding],  # embedding
-                [metadata.get("chunk_id", 0)],  # chunk_id
-                [metadata.get("document_id", 0)],  # document_id
-                [metadata.get("content_preview", "")[:2000]],  # content (截断)
-                [json.dumps(metadata, ensure_ascii=False)[:1000]]  # metadata (截断)
+                [doc_id],  # doc_id
+                [title[:500]],  # title (截断)
+                [source_path[:1000]],  # source_path (截断)
+                [chunk_id],  # chunk_id
+                [create_at],  # create_at
+                [update_at],  # update_at
+                [content[:4000]],  # content (截断)
+                [content_vector],  # content_vector
+                [type_name[:50]],  # type_name (截断)
+                [auther_name[:200]],  # auther_name (截断)
+                [user_id]  # user_id
             ]
             
             # 插入数据
@@ -265,21 +307,29 @@ class VectorService:
         collection_name: str,
         query_embedding: List[float],
         top_k: int = 10,
-        similarity_threshold: float = 0.7
+        similarity_threshold: float = 0.7,
+        user_id: str = None
     ) -> List[Dict[str, Any]]:
         """搜索向量"""
-        return self.search_vectors_sync(collection_name, query_embedding, top_k, similarity_threshold)
+        # 如果没有提供user_id，使用默认值
+        if user_id is None:
+            user_id = settings.default_user_id
+            
+        return await self.search_vectors_async(
+            collection_name, query_embedding, top_k, similarity_threshold, user_id
+        )
     
-    def search_vectors_sync(
+    async def search_vectors_async(
         self,
         collection_name: str,
         query_embedding: List[float],
         top_k: int = 10,
-        similarity_threshold: float = 0.7
+        similarity_threshold: float = 0.7,
+        user_id: str = None
     ) -> List[Dict[str, Any]]:
-        """搜索向量（同步）"""
+        """搜索向量（异步）"""
         if not self._connected:
-            self.connect_sync()
+            await self.connect()
         
         if not MILVUS_AVAILABLE or not self._connected:
             logger.error("Milvus未连接")
@@ -304,13 +354,19 @@ class VectorService:
                 "params": {"nprobe": 10}
             }
             
+            # 构建过滤表达式
+            filter_expr = None
+            if user_id:
+                filter_expr = f'user_id == "{user_id}"'
+            
             # 执行搜索
             results = collection.search(
                 data=[query_embedding],
-                anns_field="embedding",
+                anns_field="content_vector",
                 param=search_params,
                 limit=top_k,
-                output_fields=["chunk_id", "document_id", "content", "metadata"]
+                expr=filter_expr,  # 添加用户过滤
+                output_fields=["doc_id", "title", "source_path", "chunk_id", "create_at", "update_at", "content", "type_name", "auther_name", "user_id"]
             )
             
             # 处理结果
@@ -324,19 +380,19 @@ class VectorService:
                     if score < similarity_threshold:
                         continue
                     
-                    # 解析元数据
-                    try:
-                        metadata = json.loads(hit.entity.get("metadata", "{}"))
-                    except:
-                        metadata = {}
-                    
                     result = {
                         "id": hit.id,
                         "score": score,
-                        "chunk_id": hit.entity.get("chunk_id"),
-                        "document_id": hit.entity.get("document_id"),
+                        "doc_id": hit.entity.get("doc_id", ""),
+                        "title": hit.entity.get("title", ""),
+                        "source_path": hit.entity.get("source_path", ""),
+                        "chunk_id": hit.entity.get("chunk_id", 0),
+                        "create_at": hit.entity.get("create_at", ""),
+                        "update_at": hit.entity.get("update_at", ""),
                         "content": hit.entity.get("content", ""),
-                        "metadata": metadata
+                        "type_name": hit.entity.get("type_name", ""),
+                        "auther_name": hit.entity.get("auther_name", ""),
+                        "user_id": hit.entity.get("user_id", "")
                     }
                     
                     search_results.append(result)
@@ -437,15 +493,18 @@ class VectorService:
             
             collection = Collection(collection_name)
             
-            # 获取统计信息
-            stats = collection.get_stats()
+            # 获取统计信息 - 使用num_entities而不是get_stats()
+            try:
+                num_entities = collection.num_entities
+            except Exception as e:
+                logger.warning(f"获取实体数量失败: {e}")
+                num_entities = 0
             
             info = {
                 "exists": True,
                 "name": collection_name,
-                "description": collection.description,
-                "num_entities": collection.num_entities,
-                "stats": stats
+                "description": getattr(collection, 'description', ''),
+                "num_entities": num_entities
             }
             
             return info
@@ -459,24 +518,6 @@ class VectorService:
         try:
             if not self._connected:
                 success = await self.connect()
-                if not success:
-                    return False
-            
-            # 尝试列出集合
-            collections = utility.list_collections()
-            logger.info(f"Milvus连接测试成功，找到 {len(collections)} 个集合")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Milvus连接测试失败: {e}")
-            return False
-    
-    def test_connection_sync(self) -> bool:
-        """同步测试连接"""
-        try:
-            if not self._connected:
-                success = self.connect_sync()
                 if not success:
                     return False
             

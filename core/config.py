@@ -42,6 +42,7 @@ class Settings:
     MILVUS_PORT: int = int(os.getenv("MILVUS_PORT", "19530"))
     MILVUS_USER: str = os.getenv("MILVUS_USER", "")
     MILVUS_PASSWORD: str = os.getenv("MILVUS_PASSWORD", "")
+    MILVUS_COLLECTION_NAME: str = os.getenv("MILVUS_COLLECTION_NAME", "sparklinkai_knowledge")
     
     # 应用配置
     APP_HOST: str = os.getenv("APP_HOST", "0.0.0.0")
@@ -81,7 +82,12 @@ class Settings:
     @property
     def chunk_size(self) -> int:
         """获取文档分块大小"""
-        return self.config.getint('knowledge_base', 'chunk_size', fallback=512)
+        return self.config.getint('embedding', 'chunk_size', fallback=512)
+    
+    @property
+    def chunk_overlap(self) -> int:
+        """获取文档分块重叠大小"""
+        return self.config.getint('embedding', 'chunk_overlap', fallback=50)
     
     @property
     def top_k(self) -> int:

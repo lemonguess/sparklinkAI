@@ -266,6 +266,10 @@ class EmbeddingService:
             logger.error(f"批量计算相似度失败: {e}")
             raise
     
+    def is_available(self) -> bool:
+        """检查嵌入服务是否可用"""
+        return bool(self.api_key)
+
     async def test_connection(self) -> bool:
         """测试嵌入服务连接"""
         try:

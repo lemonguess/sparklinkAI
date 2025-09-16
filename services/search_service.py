@@ -7,6 +7,8 @@ import json
 from urllib.parse import quote
 
 from core.config import settings
+from services.embedding_service import EmbeddingService
+from services.vector_service import VectorService
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,10 @@ class SearchService:
         self.web_search_api_key = settings.WEB_SEARCH_API_KEY
         self.web_search_enabled = settings.web_search_enabled
         self.timeout = 10  # 搜索超时时间
+        
+        # 初始化嵌入和向量服务
+        self.embedding_service = EmbeddingService()
+        self.vector_service = VectorService()
         
         # HTTP客户端
         self.client = httpx.AsyncClient(
@@ -380,3 +386,31 @@ class SearchService:
                 self.sync_client.close()
         except Exception:
             pass
+
+
+    async def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        similarity_threshold: float = 0.7,
+        collection_name: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """知识库搜索"""
+        try:
+            # 生成查询向量
+            query_embedding = await self.embedding_service.generate_embedding(query)
+            
+            # 向量搜索
+            collection_name = collection_name or "sparklinkai_knowledge"
+            results = await self.vector_service.search_vectors(
+                collection_name=collection_name,
+                query_embedding=query_embedding,
+                top_k=top_k,
+                similarity_threshold=similarity_threshold
+            )
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"知识库搜索失败: {e}")
+            return []

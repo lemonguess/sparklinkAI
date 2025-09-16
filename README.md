@@ -10,7 +10,6 @@
 - **流式响应**: 支持 SSE 流式对话，提供实时交互体验
 - **异步处理**: 使用 Celery 处理文档解析和向量生成任务
 - **多格式支持**: 支持 PDF、Word、PPT、图片等多种文档格式
-- **PocketFlow框架**: 智能搜索策略，动态决策最优搜索方案
 - **用户会话管理**: 支持多用户、多会话的聊天管理
 - **UUID用户系统**: 支持UUID格式的用户标识符
 
@@ -211,9 +210,7 @@ curl -X POST "http://localhost:8000/api/v1/kb/search" \
   }'
 ```
 
-## 🧠 PocketFlow 智能搜索
-
-PocketFlow 是本项目的核心智能搜索框架，实现了以下功能：
+## 🧠 智能搜索
 
 ### 智能决策策略
 
@@ -402,6 +399,5 @@ MIT License
 - [Redis](https://redis.io/) - 内存数据结构存储
 - [MySQL](https://www.mysql.com/) - 关系型数据库
 - [Milvus](https://milvus.io/) - 向量数据库
-- [PocketFlow](https://github.com/pocketflow/pocketflow) - 智能搜索框架
 - [uv](https://github.com/astral-sh/uv) - 极速 Python 包管理器
 - [SiliconFlow](https://siliconflow.cn/) - AI 模型服务平台

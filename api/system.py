@@ -32,7 +32,7 @@ async def get_system_status(db: Session = Depends(get_db)):
         # Milvus状态检查
         vector_service = VectorService()
         try:
-            milvus_status = "healthy" if vector_service.test_connection_sync() else "unhealthy"
+            milvus_status = "healthy" if await vector_service.test_connection() else "unhealthy"
         except Exception as e:
             logger.warning(f"Milvus状态检查失败: {e}")
             milvus_status = "unhealthy"
