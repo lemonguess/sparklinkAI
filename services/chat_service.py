@@ -13,6 +13,7 @@ from models.database import ChatMessage as DBChatMessage
 from services.knowledge_service import KnowledgeService
 from services.search_service import SearchService
 from models.enums import SearchStrategy
+from utils.extract_keyword import extract_keywords, need_web_search
 logger = logging.getLogger(__name__)
 
 
@@ -38,9 +39,8 @@ class ChatService:
         self,
         query: str,
         strategy: SearchStrategy = SearchStrategy.AUTO,
-        max_results: int = 5,
-        use_knowledge_base: bool = True,
-        use_web_search: bool = True
+        kg_max_results: int = 5,
+        web_max_results: int = 10,
     ) -> Dict[str, Any]:
         """智能搜索 - 整合知识库和网络搜索"""
         logger.info(f"🚀 开始智能搜索: {query}")
@@ -50,55 +50,45 @@ class ChatService:
         decision_reasoning = ""
         
         try:
-            # 第一步：知识库搜索
-            if use_knowledge_base:
+            if strategy != SearchStrategy.NONE:
                 logger.info("🔍 执行知识库搜索")
                 knowledge_results = await self.knowledge_service.search(
                     query=query,
-                    top_k=10
+                    top_k=kg_max_results
                 )
-            
-            # 第二步：智能决策是否需要网络搜索
-            need_web_search = False
-            quality_score = 0.0
-            
-            if knowledge_results:
-                # 计算知识库结果质量
-                scores = [r.get('score', 0) for r in knowledge_results]
-                quality_score = sum(scores) / len(scores) if scores else 0.0
-                max_score = max(scores) if scores else 0.0
-                
-                # 智能判断逻辑
-                if strategy == SearchStrategy.AUTO:
-                    need_web_search = (
-                        len(knowledge_results) < 3 or  # 结果数量不足
-                        max_score < 0.8 or  # 最高相似度不够
-                        quality_score < 0.7  # 平均质量不够
-                    )
-                    decision_reasoning = f"知识库质量评分: {quality_score:.2f}, 最高分: {max_score:.2f}, 结果数: {len(knowledge_results)}"
-                elif strategy == SearchStrategy.HYBRID:
-                    need_web_search = True
-                    decision_reasoning = "混合策略：同时使用知识库和网络搜索"
-                elif strategy == SearchStrategy.WEB_FIRST:
-                    need_web_search = True
-                    decision_reasoning = "网络优先策略"
-                else:  # KNOWLEDGE_FIRST
-                    need_web_search = quality_score < 0.6  # 只有质量很低时才网络搜索
-                    decision_reasoning = f"知识库优先策略，质量评分: {quality_score:.2f}"
-            else:
-                need_web_search = use_web_search
-                decision_reasoning = "知识库无结果，启用网络搜索"
-            
-            # 第三步：条件性网络搜索
-            if need_web_search and use_web_search:
-                logger.info("🌐 执行网络搜索")
+            # 第三步：判断是否需要网络搜索
+            if strategy == SearchStrategy.WEB_ONLY:
+                decision_reasoning = "仅需网络搜索"
+                query_string = extract_keywords(query)
                 web_results = await self.search_service.web_search(
-                    query=query,
-                    max_results=max_results
+                    query=query_string,
+                    max_results=web_max_results
                 )
+            elif strategy == SearchStrategy.KNOWLEDGE_ONLY:
+                decision_reasoning = "仅需知识库搜索"
+                pass
+            elif strategy == SearchStrategy.HYBRID:
+                decision_reasoning = "混合检索--知识库+网络搜索"
+                query_string = extract_keywords(query)
+                web_results = await self.search_service.web_search(
+                    query=query_string,
+                    max_results=web_max_results
+                )
+            elif strategy == SearchStrategy.AUTO:
+                if need_web_search(query):
+                    decision_reasoning = "根据关键词判断需要网络搜索"
+                    logger.info("🌐 执行网络搜索")
+                    query_string = extract_keywords(query)
+                    web_results = await self.search_service.web_search(
+                        query=query_string,
+                        max_results=web_max_results
+                    )
+                else:
+                    decision_reasoning = "根据关键词判断不需要网络搜索"
             logger.info(f"✅ 智能搜索完成: 知识库{len(knowledge_results)}条, 网络{len(web_results)}条")
             
             return {
+                'success': True,
                 'knowledge_results': knowledge_results,
                 'web_results': web_results,
                 'decision_reasoning': decision_reasoning
@@ -106,6 +96,7 @@ class ChatService:
         except Exception as e:
             logger.error(f"智能搜索失败: {e}", exc_info=True)
             return {
+                'success': False,
                 'knowledge_results': [],
                 'web_results': [],
                 'decision_reasoning': f"智能搜索失败: {e}"
@@ -118,23 +109,21 @@ class ChatService:
         web_search_results: List[Dict[str, Any]] = None,
         session_id: Optional[str] = None,
         stream: bool = False,
-        use_intelligent_search: bool = False,
-        search_strategy: SearchStrategy = SearchStrategy.AUTO
     ) -> str:
         """生成聊天回复"""
         try:
-            # 如果启用智能搜索，则自动获取搜索结果
-            if use_intelligent_search:
-                search_result = await self.intelligent_search(
-                    query=message,
-                    strategy=search_strategy,
-                    max_results=5
-                )
+            # # 如果启用智能搜索，则自动获取搜索结果
+            # if use_intelligent_search:
+            #     search_result = await self.intelligent_search(
+            #         query=message,
+            #         strategy=search_strategy,
+            #         max_results=5
+            #     )
                 
-                if search_result.get('success', False):
-                    knowledge_sources = search_result.get('knowledge_results', [])
-                    web_search_results = search_result.get('web_results', [])
-                    logger.info(f"智能搜索获得: 知识库{len(knowledge_sources)}条, 网络{len(web_search_results)}条")
+            #     if search_result.get('success', False):
+            #         knowledge_sources = search_result.get('knowledge_results', [])
+            #         web_search_results = search_result.get('web_results', [])
+            #         logger.info(f"智能搜索获得: 知识库{len(knowledge_sources)}条, 网络{len(web_search_results)}条")
             
             # 构建系统提示词
             system_prompt = self._build_system_prompt(
@@ -170,28 +159,13 @@ class ChatService:
     async def generate_stream_response(
         self,
         message: str,
-        knowledge_sources: List[Dict[str, Any]] = None,
-        web_search_results: List[Dict[str, Any]] = None,
+        knowledge_sources: List = None,
+        web_search_results: List = None,
         session_id: Optional[str] = None,
-        request_id: Optional[str] = None,  # 添加 request_id
-        use_intelligent_search: bool = False,
-        search_strategy: SearchStrategy = SearchStrategy.AUTO
+        request_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """生成流式聊天回复"""
-        try:
-            # # 如果启用智能搜索，则自动获取搜索结果
-            if use_intelligent_search:
-                search_result = await self.intelligent_search(
-                    query=message,
-                    strategy=search_strategy,
-                    max_results=10
-                )
-                
-                if search_result.get('success', False):
-                    knowledge_sources = search_result.get('knowledge_results', [])
-                    web_search_results = search_result.get('web_results', [])
-                    logger.info(f"智能搜索获得: 知识库{len(knowledge_sources)}条, 网络{len(web_search_results)}条")
-                      
+        try:           
             # 构建系统提示词
             system_prompt = self._build_system_prompt(
                 knowledge_sources=knowledge_sources,
@@ -234,12 +208,12 @@ class ChatService:
                     if chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
                         logger.info(f"📤 流式输出: '{content}' (request_id: {request_id})")
-                        yield content
+                        yield 'content', content
                         
                     if hasattr(chunk.choices[0].delta, 'reasoning_content') and chunk.choices[0].delta.reasoning_content:
                         reasoning = chunk.choices[0].delta.reasoning_content
                         logger.info(f"🧠 推理内容: '{reasoning}' (request_id: {request_id})")
-                        yield reasoning
+                        yield 'think', reasoning
                         
             except Exception as e:
                 logger.error(f"流式生成失败: {e}")
@@ -285,7 +259,7 @@ class ChatService:
         # 添加知识库信息
         if knowledge_sources:
             base_prompt += "\n\n**相关知识库内容：**\n"
-            for i, source in enumerate(knowledge_sources[:5], 1):  # 最多5个来源
+            for i, source in enumerate(knowledge_sources, 1):  # 最多5个来源
                 content = source.get('content', '').strip()
                 score = source.get('score', 0)
                 base_prompt += f"{i}. [相似度: {score:.2f}] {content}\n"
@@ -293,7 +267,7 @@ class ChatService:
         # 添加搜索结果
         if web_search_results:
             base_prompt += "\n\n**相关搜索结果：**\n"
-            for i, result in enumerate(web_search_results[:3], 1):  # 最多3个搜索结果
+            for i, result in enumerate(web_search_results, 1):  # 最多3个搜索结果
                 title = result.get('title', '').strip()
                 content = result.get('content', '').strip()
                 url = result.get('url', '')

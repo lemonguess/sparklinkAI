@@ -1,7 +1,8 @@
 from enum import Enum
 class SearchStrategy(Enum):
     """搜索策略枚举"""
-    KNOWLEDGE_FIRST = "knowledge_first"
-    WEB_FIRST = "web_first"
+    KNOWLEDGE_ONLY = "knowledge_only"
+    WEB_ONLY = "web_only"
     HYBRID = "hybrid"
     AUTO = "auto"
+    NONE  = 'none'

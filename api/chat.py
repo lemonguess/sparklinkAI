@@ -269,13 +269,20 @@ async def chat_stream(
             was_cancelled = False
             
             try:
-                async for chunk in await chat_service.intelligent_chat(
+                search_result = await chat_service.intelligent_search(
+                    query=request.message,
+                    strategy=SearchStrategy.AUTO,
+                )
+                yield f"data: {json.dumps({'type': 'source', 'content': search_result}, ensure_ascii=False)}\n\n"
+                async for _type, chunk in chat_service.generate_stream_response(
                     message=request.message,
+                    knowledge_sources=search_result['knowledge_results'],
+                    web_search_results=search_result['web_results'],
+                    request_id=request_id,
                     session_id=session_id,
-                    stream=True
                 ):
                     full_response += chunk
-                    yield f"data: {json.dumps({'type': 'content', 'content': chunk}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': _type, 'content': chunk}, ensure_ascii=False)}\n\n"
                     
                     # 检查是否被取消
                     if request_id in active_streams and active_streams[request_id].get('cancelled', False):
@@ -284,6 +291,7 @@ async def chat_stream(
                         break
             except Exception as e:
                 logger.error(f"流式生成过程中出错: {e}")
+                yield f"data: {json.dumps({'type': 'content', 'content': "抱歉，生成回复时出现错误。"}, ensure_ascii=False)}\n\n"
                 if not full_response:
                     full_response = "抱歉，生成回复时出现错误。"
             
