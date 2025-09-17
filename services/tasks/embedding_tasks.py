@@ -1,501 +1,268 @@
-"""嵌入向量生成相关的Celery任务"""
+"""嵌入任务模块"""
+import asyncio
+from contextlib import contextmanager
+from typing import Dict, Any, List
 import os
+import json
+import asyncio
+import requests
+from urllib.parse import urlparse
+from datetime import datetime, timezone, timedelta
+import mimetypes
 import logging
-from typing import List, Dict, Any
-import uuid
-
-from celery import current_task
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
-
-from services.celery_app import celery_app
+from models.enums import DocType
 from core.config import settings
-from models.database import DocumentChunk, Document
+from core.database import get_db
+from models.database import DocumentEmbeddingTask, TaskStatus
+from models.schemas import DocumentEmbeddingTaskRequest
+from services.document_service import DocumentService
 from services.embedding_service import EmbeddingService
 from services.vector_service import VectorService
-from services.document_service import DocumentService
+from services.celery_app import celery_app
 
+# 配置日志
 logger = logging.getLogger(__name__)
 
-# 创建数据库会话
-engine = create_engine(settings.database_url)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# 初始化服务
+document_service = DocumentService()
+embedding_service = EmbeddingService()
+vector_service = VectorService()
 
-@celery_app.task(bind=True, name="generate_embedding")
-def generate_embedding_task(self, chunk_id: int):
-    """为文档分块生成嵌入向量的异步任务"""
-    import asyncio
-    
-    async def _async_generate_embedding():
-        db = SessionLocal()
-        embedding_service = EmbeddingService()
-        vector_service = VectorService()
-        
-        try:
-            # 更新任务状态
-            self.update_state(
-                state="PROCESSING",
-                meta={"progress": 0, "status": "开始生成嵌入向量"}
-            )
-            
-            # 获取文档分块
-            chunk = db.query(DocumentChunk).filter(DocumentChunk.id == chunk_id).first()
-            if not chunk:
-                raise Exception(f"文档分块不存在: {chunk_id}")
-            
-            logger.info(f"开始为分块 {chunk_id} 生成嵌入向量")
-            
-            # 步骤1: 生成嵌入向量
-            self.update_state(
-                state="PROCESSING",
-                meta={"progress": 30, "status": "调用嵌入模型"}
-            )
-            
-            try:
-                embedding = await embedding_service.generate_embedding(
-                    text=chunk.content,
-                    model=chunk.embedding_model or settings.embedding_model
-                )
-            except Exception as e:
-                logger.error(f"生成嵌入向量失败: {e}")
-                raise Exception(f"嵌入向量生成失败: {str(e)}")
-            
-            # 步骤2: 存储到向量数据库
-            self.update_state(
-                state="PROCESSING",
-                meta={"progress": 70, "status": "存储向量数据"}
-            )
-            
-            try:
-                # 生成唯一的向量ID
-                vector_id = f"chunk_{chunk_id}_{uuid.uuid4().hex[:8]}"
-                
-                # 准备元数据，添加doc_id和user_id
-                metadata = {
-                    "chunk_id": chunk_id,
-                    "document_id": chunk.document_id,
-                    "doc_id": chunk.document_id,  # 添加doc_id作为元数据
-                    "user_id": settings.default_user_id,  # 使用默认用户ID
-                    "chunk_index": chunk.chunk_index,
-                    "content_preview": chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
-                    "embedding_model": chunk.embedding_model or settings.embedding_model
-                }
-                
-                # 存储到Milvus
-                success = await vector_service.insert_vector(
-                    collection_name=settings.MILVUS_COLLECTION_NAME,
-                    vector_id=vector_id,
-                    embedding=embedding,
-                    metadata=metadata
-                )
-                
-                if not success:
-                    raise Exception("向量存储失败")
-                
-            except Exception as e:
-                logger.error(f"向量存储失败: {e}")
-                raise Exception(f"向量存储失败: {str(e)}")
-            
-            # 步骤3: 更新数据库记录
-            self.update_state(
-                state="PROCESSING",
-                meta={"progress": 90, "status": "更新数据库记录"}
-            )
-            
-            chunk.vector_id = vector_id
-            db.commit()
-            
-            # 完成
-            self.update_state(
-                state="SUCCESS",
-                meta={"progress": 100, "status": "嵌入向量生成完成"}
-            )
-            
-            logger.info(f"分块 {chunk_id} 嵌入向量生成完成，向量ID: {vector_id}")
-            
-            return {
-                "chunk_id": chunk_id,
-                "vector_id": vector_id,
-                "embedding_dimension": len(embedding),
-                "status": "completed"
-            }
-            
-        except Exception as e:
-            logger.error(f"嵌入向量生成失败: {e}", exc_info=True)
-            
-            # 更新任务状态
-            self.update_state(
-                state="FAILURE",
-                meta={"error": str(e), "chunk_id": chunk_id}
-            )
-            
-            raise
-        
-        finally:
-            db.close()
-    
-    # 运行异步函数
-    return asyncio.run(_async_generate_embedding())
 
-@celery_app.task(bind=True, name="process_and_embed_document")
-def process_and_embed_document_task(self, file_path: str, filename: str, user_id: str = None):
-    """处理文档并生成嵌入向量的完整任务"""
-    import asyncio
-    
-    async def _async_process_document():
-        db = SessionLocal()
-        document_service = DocumentService()
-        embedding_service = EmbeddingService()
-        vector_service = VectorService()
-        
-        try:
-            # 使用默认用户ID如果未提供
-            if not user_id:
-                user_id = settings.default_user_id
-                
-            # 更新任务状态
-            self.update_state(
-                state="PROCESSING",
-                meta={"progress": 0, "status": "开始处理文档"}
-            )
-            
-            # 步骤1: 解析文档内容
-            self.update_state(
-                state="PROCESSING",
-                meta={"progress": 10, "status": "解析文档内容"}
-            )
-            
-            try:
-                content = document_service.extract_text_from_file(file_path)
-                if not content or not content.strip():
-                    raise Exception("文档内容为空或无法解析")
-            except Exception as e:
-                logger.error(f"文档解析失败: {e}")
-                raise Exception(f"文档解析失败: {str(e)}")
-            
-            # 步骤2: 创建文档记录
-            self.update_state(
-                state="PROCESSING",
-                meta={"progress": 20, "status": "创建文档记录"}
-            )
-            
-            document = Document(
-                original_filename=filename,
-                file_path=file_path,
-                file_size=os.path.getsize(file_path) if os.path.exists(file_path) else 0,
-                content=content,
-                status="processing",
-                user_id=user_id
-            )
-            db.add(document)
-            db.commit()
-            db.refresh(document)
-            
-            # 步骤3: 文档分块
-            self.update_state(
-                state="PROCESSING",
-                meta={"progress": 30, "status": "文档分块处理"}
-            )
-            
-            # 根据配置的chunk_size进行分块
-            chunk_size = settings.chunk_size
-            chunk_overlap = 50  # 重叠字符数
-            
-            chunks = []
-            content_length = len(content)
-            
-            for i in range(0, content_length, chunk_size - chunk_overlap):
-                chunk_content = content[i:i + chunk_size]
-                if chunk_content.strip():  # 只保存非空分块
-                    chunks.append(chunk_content)
-            
-            if not chunks:
-                raise Exception("文档分块后无有效内容")
-            
-            # 步骤4: 创建分块记录并生成嵌入
-            total_chunks = len(chunks)
-            embedded_chunks = 0
-            
-            for chunk_index, chunk_content in enumerate(chunks):
-                try:
-                    # 创建分块记录
-                    chunk = DocumentChunk(
-                        document_id=document.id,
-                        chunk_index=chunk_index,
-                        content=chunk_content,
-                        embedding_model=settings.embedding_model
-                    )
-                    db.add(chunk)
-                    db.commit()
-                    db.refresh(chunk)
-                    
-                    # 生成嵌入向量
-                    embedding = await embedding_service.generate_embedding(
-                        text=chunk_content,
-                        model=settings.embedding_model
-                    )
-                    
-                    # 生成唯一的向量ID
-                    vector_id = f"chunk_{chunk.id}_{uuid.uuid4().hex[:8]}"
-                    
-                    # 准备元数据
-                    metadata = {
-                        "chunk_id": chunk.id,
-                        "document_id": document.id,
-                        "doc_id": document.id,  # 添加doc_id作为元数据
-                        "user_id": user_id,
-                        "chunk_index": chunk_index,
-                        "content_preview": chunk_content[:200] + "..." if len(chunk_content) > 200 else chunk_content,
-                        "embedding_model": settings.embedding_model,
-                        "filename": filename
-                    }
-                    
-                    # 存储到Milvus
-                    success = await vector_service.insert_vector(
-                        collection_name=settings.MILVUS_COLLECTION_NAME,
-                        vector_id=vector_id,
-                        embedding=embedding,
-                        metadata=metadata
-                    )
-                    
-                    if success:
-                        chunk.vector_id = vector_id
-                        db.commit()
-                        embedded_chunks += 1
-                        
-                        # 更新进度
-                        progress = 40 + int((embedded_chunks / total_chunks) * 50)
-                        self.update_state(
-                            state="PROCESSING",
-                            meta={
-                                "progress": progress, 
-                                "status": f"已处理 {embedded_chunks}/{total_chunks} 个分块"
-                            }
-                        )
-                    else:
-                        logger.warning(f"分块 {chunk.id} 向量存储失败")
-                        
-                except Exception as e:
-                    logger.error(f"处理分块 {chunk_index} 失败: {e}")
-                    continue
-            
-            # 步骤5: 更新文档状态
-            self.update_state(
-                state="PROCESSING",
-                meta={"progress": 95, "status": "更新文档状态"}
-            )
-            
-            if embedded_chunks > 0:
-                document.status = "completed"
-                document.chunk_count = embedded_chunks
-            else:
-                document.status = "failed"
-                raise Exception("所有分块处理失败")
-            
-            db.commit()
-            
-            # 完成
-            self.update_state(
-                state="SUCCESS",
-                meta={"progress": 100, "status": "文档处理完成"}
-            )
-            
-            logger.info(f"文档 {filename} 处理完成，共生成 {embedded_chunks} 个嵌入向量")
-            
-            return {
-                "document_id": document.id,
-                "filename": filename,
-                "total_chunks": total_chunks,
-                "embedded_chunks": embedded_chunks,
-                "status": "completed"
-            }
-            
-        except Exception as e:
-            logger.error(f"文档处理失败: {e}", exc_info=True)
-            
-            # 更新文档状态为失败
-            if 'document' in locals():
-                document.status = "failed"
-                db.commit()
-            
-            # 更新任务状态
-            self.update_state(
-                state="FAILURE",
-                meta={"error": str(e), "filename": filename}
-            )
-            
-            raise
-        
-        finally:
-            db.close()
-    
-    # 运行异步函数
-    return asyncio.run(_async_process_document())
-
-@celery_app.task(bind=True, name="batch_generate_embeddings")
-def batch_generate_embeddings_task(self, chunk_ids: List[int]):
-    """批量生成嵌入向量的异步任务"""
+@contextmanager
+def get_db_session():
+    """数据库会话上下文管理器"""
+    db = next(get_db())
     try:
-        total_chunks = len(chunk_ids)
-        processed_chunks = 0
-        failed_chunks = []
-        
-        for i, chunk_id in enumerate(chunk_ids):
-            try:
-                # 更新批量处理进度
-                progress = int((i / total_chunks) * 100)
-                self.update_state(
-                    state="PROCESSING",
-                    meta={
-                        "progress": progress,
-                        "status": f"处理分块 {i+1}/{total_chunks}",
-                        "current_chunk_id": chunk_id
-                    }
-                )
-                
-                # 调用单个嵌入生成任务
-                result = generate_embedding_task.apply(args=[chunk_id])
-                if result.successful():
-                    processed_chunks += 1
-                else:
-                    failed_chunks.append({"chunk_id": chunk_id, "error": str(result.result)})
-                    
-            except Exception as e:
-                logger.error(f"批量生成嵌入向量，分块 {chunk_id} 失败: {e}")
-                failed_chunks.append({"chunk_id": chunk_id, "error": str(e)})
-        
-        # 完成批量处理
-        self.update_state(
-            state="SUCCESS",
-            meta={
-                "progress": 100,
-                "status": "批量嵌入向量生成完成",
-                "total_chunks": total_chunks,
-                "processed_chunks": processed_chunks,
-                "failed_chunks": len(failed_chunks),
-                "failed_details": failed_chunks
-            }
-        )
-        
-        return {
-            "total_chunks": total_chunks,
-            "processed_chunks": processed_chunks,
-            "failed_chunks": len(failed_chunks),
-            "failed_details": failed_chunks
-        }
-        
+        yield db
     except Exception as e:
-        logger.error(f"批量生成嵌入向量失败: {e}", exc_info=True)
-        self.update_state(
-            state="FAILURE",
-            meta={"error": str(e)}
-        )
-        raise
-
-@celery_app.task(bind=True, name="rebuild_embeddings")
-def rebuild_embeddings_task(self, document_id: int = None, embedding_model: str = None):
-    """重建嵌入向量的异步任务"""
-    db = SessionLocal()
-    
-    try:
-        # 查询需要重建的分块
-        query = db.query(DocumentChunk)
-        
-        if document_id:
-            query = query.filter(DocumentChunk.document_id == document_id)
-        
-        chunks = query.all()
-        
-        if not chunks:
-            return {"message": "没有找到需要重建的分块", "status": "completed"}
-        
-        # 更新嵌入模型（如果提供）
-        if embedding_model:
-            for chunk in chunks:
-                chunk.embedding_model = embedding_model
-                chunk.vector_id = None  # 清空旧的向量ID
-            db.commit()
-        
-        # 批量生成新的嵌入向量
-        chunk_ids = [chunk.id for chunk in chunks]
-        
-        self.update_state(
-            state="PROCESSING",
-            meta={
-                "progress": 0,
-                "status": f"开始重建 {len(chunk_ids)} 个分块的嵌入向量",
-                "total_chunks": len(chunk_ids)
-            }
-        )
-        
-        # 调用批量生成任务
-        result = batch_generate_embeddings_task.apply(args=[chunk_ids])
-        
-        return {
-            "document_id": document_id,
-            "embedding_model": embedding_model,
-            "total_chunks": len(chunk_ids),
-            "rebuild_result": result.result,
-            "status": "completed"
-        }
-        
-    except Exception as e:
-        logger.error(f"重建嵌入向量失败: {e}", exc_info=True)
-        self.update_state(
-            state="FAILURE",
-            meta={"error": str(e)}
-        )
-        raise
-    
-    finally:
-        db.close()
-
-@celery_app.task(bind=True, name="update_embedding_model")
-def update_embedding_model_task(self, old_model: str, new_model: str):
-    """更新嵌入模型的异步任务"""
-    db = SessionLocal()
-    
-    try:
-        # 查找使用旧模型的分块
-        chunks = db.query(DocumentChunk).filter(
-            DocumentChunk.embedding_model == old_model
-        ).all()
-        
-        if not chunks:
-            return {
-                "message": f"没有找到使用模型 {old_model} 的分块",
-                "status": "completed"
-            }
-        
-        logger.info(f"找到 {len(chunks)} 个使用旧模型 {old_model} 的分块，将更新为 {new_model}")
-        
-        # 更新模型并清空向量ID
-        for chunk in chunks:
-            chunk.embedding_model = new_model
-            chunk.vector_id = None
-        
-        db.commit()
-        
-        # 重新生成嵌入向量
-        chunk_ids = [chunk.id for chunk in chunks]
-        result = batch_generate_embeddings_task.apply(args=[chunk_ids])
-        
-        return {
-            "old_model": old_model,
-            "new_model": new_model,
-            "updated_chunks": len(chunk_ids),
-            "regeneration_result": result.result,
-            "status": "completed"
-        }
-        
-    except Exception as e:
-        logger.error(f"更新嵌入模型失败: {e}", exc_info=True)
         db.rollback()
-        self.update_state(
-            state="FAILURE",
-            meta={"error": str(e)}
-        )
+        logger.error(f"数据库操作失败，已回滚: {e}")
         raise
-    
     finally:
         db.close()
+
+
+def update_task_status(doc_id: str, **kwargs):
+    """更新任务状态的辅助函数"""
+    if not doc_id:
+        raise ValueError("doc_id不能为空")
+    
+    try:
+        with get_db_session() as db:
+            task_record = db.query(DocumentEmbeddingTask).filter(
+                DocumentEmbeddingTask.doc_id == doc_id
+            ).first()
+            if task_record:
+                for key, value in kwargs.items():
+                    if hasattr(task_record, key):
+                        setattr(task_record, key, value)
+                db.commit()
+                logger.debug(f"任务状态更新成功: {kwargs}")
+    except Exception as e:
+        logger.error(f"更新任务状态失败: {e}")
+
+
+@celery_app.task(bind=True)
+def process_and_embed_document_task(self, request_data: dict) -> Dict[str, Any]:
+    """
+    处理文档并生成嵌入向量
+    
+    Args:
+        request_data: 文档嵌入任务请求数据字典
+    
+    Returns:
+        处理结果
+    """
+    # 将字典转换为DocumentEmbeddingTaskRequest对象
+    request = DocumentEmbeddingTaskRequest(**request_data)
+    try:
+        logger.info(f"开始处理文档: {request.file_path}, 类型: {request.doc_type}")
+        # 更新任务状态为处理中
+        update_task_status(
+            request.doc_id,
+            status=TaskStatus.PROCESSING,
+            started_at=datetime.now(timezone(timedelta(hours=8)))
+        )
+        if request.doc_type == DocType.POST:
+            # 帖子类型的文档，直接使用内容
+            actual_file_path = None
+            doc_content = request.doc_content
+        else:
+            # 判断是URL还是本地文件路径
+            is_url = False
+            actual_file_path = request.file_path
+            temp_file_path = None
+            parsed_url = urlparse(request.file_path)
+            if parsed_url.scheme in ('http', 'https'):
+                is_url = True
+                logger.info(f"检测到URL，开始下载: {request.file_path}")
+                # 下载文件到临时目录
+                response = requests.get(request.file_path, timeout=30)
+                response.raise_for_status()
+                # 从URL或Content-Disposition头获取文件名
+                _, ext = os.path.splitext(request.file_path)
+                filename = request.doc_id + ext
+                if not filename or '.' not in filename:
+                    raise ValueError(f"无法从URL提取文件名: {request.file_path}")
+                # 保存到上传目录
+                upload_dir = settings.upload_dir
+                os.makedirs(upload_dir, exist_ok=True)
+                temp_file_path = os.path.join(upload_dir, filename)
+                with open(temp_file_path, 'wb') as f:
+                    f.write(response.content)
+                actual_file_path = temp_file_path
+                logger.info(f"文件下载完成: {actual_file_path}")
+                file_type, _ = mimetypes.guess_type(actual_file_path)
+                if not file_type:
+                    file_type = "text/plain"  # 默认类型
+                doc_content = document_service.extract_text_from_file(actual_file_path, file_type)
+                if not doc_content or not doc_content.strip():
+                    error_msg = f"文件内容为空: {actual_file_path}"
+                    raise ValueError(error_msg)
+            else:
+                # 本地文件处理
+                file_type, _ = mimetypes.guess_type(actual_file_path)
+                if not file_type:
+                    file_type = "text/plain"
+                doc_content = document_service.extract_text_from_file(actual_file_path, file_type)
+                if not doc_content or not doc_content.strip():
+                    error_msg = f"文件内容为空: {actual_file_path}"
+                    raise ValueError(error_msg)
+        logger.info(f"文件内容提取成功，长度: {len(doc_content)} 字符")
+        # 2. 根据配置文件进行文档分块
+        chunks = document_service.split_content(
+            content=doc_content,
+            chunk_size=settings.chunk_size,
+            overlap=settings.chunk_overlap
+        )
+        if not chunks:
+            error_msg = f"文档分块失败: {actual_file_path}"
+            logger.warning(error_msg)
+            return {"status": "error", "message": "文档分块失败，可能是内容格式不支持"}
+        logger.info(f"文档分块成功，共生成 {len(chunks)} 个分块")
+        # 更新总分块数
+        update_task_status(
+            request.doc_id,
+            total_chunks=len(chunks),
+            progress=10.0
+        )
+        # 3. 连接向量数据库
+        async def connect_vector_db():
+            return await vector_service.connect()
+        try:
+            if not asyncio.run(connect_vector_db()):
+                error_msg = "向量数据库连接失败"
+                logger.error(error_msg)
+                return {"status": "error", "message": error_msg}
+            logger.info("向量数据库连接成功")
+        except Exception as e:
+            error_msg = f"向量数据库连接异常: {str(e)}"
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg}
+        # 4. 为每个分块生成嵌入向量并存储
+        collection_name = settings.vector_db_collection_name
+        processed_count = 0
+        failed_count = 0
+        logger.info(f"开始处理 {len(chunks)} 个分块，目标集合: {collection_name}")
+        # 批量处理优化
+        batch_size = 10  # 每批处理10个分块
+        for i in range(0, len(chunks), batch_size):
+            batch_chunks = chunks[i:i + batch_size]
+            batch_vectors = []  
+            # 批量生成嵌入向量
+            try:
+                batch_embeddings = embedding_service.generate_embeddings(batch_chunks)
+                for j, (chunk, embedding) in enumerate(zip(batch_chunks, batch_embeddings)):
+                    if embedding:
+                        vector_id = f"{os.path.basename(actual_file_path)}_{i+j}_{request.doc_id or 'default'}"
+                        
+                        vector_data = {
+                            "collection_name": collection_name,
+                            "vector_id": vector_id,
+                            "doc_id": request.doc_id or "default",
+                            "doc_name": os.path.basename(actual_file_path),
+                            "source_path": actual_file_path,
+                            "create_at": datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),
+                            "update_at": datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),
+                            "chunk_content": chunk,
+                            "vector": embedding,
+                            "doc_type": request.doc_type,
+                            "user_id": request.user_id,
+                            "group_id": request.group_id
+                        }
+                        batch_vectors.append(vector_data)
+                        processed_count += 1
+                        logger.debug(f"分块 {i+j+1} 向量生成成功")
+                    else:
+                        failed_count += 1
+                        logger.warning(f"分块 {i+j+1} 嵌入向量生成失败")
+                
+                # 批量插入向量
+                if batch_vectors:
+                    try:
+                        async def batch_insert_vectors():
+                            return await vector_service.batch_insert_vectors_async(batch_vectors)
+                        
+                        success = asyncio.run(batch_insert_vectors())
+                        if success:
+                            logger.debug(f"批次 {i//batch_size + 1} 向量插入成功，包含 {len(batch_vectors)} 个向量")
+                        else:
+                            failed_count += len(batch_vectors)
+                            processed_count -= len(batch_vectors)
+                            logger.warning(f"批次 {i//batch_size + 1} 向量插入失败")
+                    except Exception as insert_error:
+                        failed_count += len(batch_vectors)
+                        processed_count -= len(batch_vectors)
+                        logger.warning(f"批次 {i//batch_size + 1} 向量插入失败: {insert_error}")
+                # 更新进度
+                update_task_status(
+                    request.doc_id,
+                    processed_chunks=processed_count,
+                    progress=10.0 + (min(i + batch_size, len(chunks)) / len(chunks)) * 80.0
+                )
+            except Exception as batch_error:
+                failed_count += len(batch_chunks)
+                logger.error(f"批次 {i//batch_size + 1} 处理失败: {batch_error}")
+        
+        logger.info(f"分块处理完成 - 总数: {len(chunks)}, 成功: {processed_count}, 失败: {failed_count}")
+        # 5. 完成任务
+        result = {
+            "status": "success",
+            "file_path": request.file_path,  # 保留原始路径用于记录
+            "actual_file_path": actual_file_path,  # 实际处理的文件路径
+            "total_chunks": len(chunks),
+            "processed_chunks": processed_count,
+            "failed_chunks": failed_count,
+            "doc_type": request.doc_type,
+            "is_url": is_url,
+            "success_rate": round(processed_count / len(chunks) * 100, 2) if chunks else 0
+        }
+        # 更新任务完成状态
+        update_task_status(
+            request.doc_id,
+            status=TaskStatus.COMPLETED,
+            progress=100.0,
+            completed_at=datetime.now(timezone(timedelta(hours=8))),
+            result=json.dumps(result, ensure_ascii=False)
+        )
+        logger.info(f"文档处理完成: {result}")
+        return result   
+    except Exception as e:
+        logger.error(f"处理文档时发生错误: {str(e)}")
+        # 更新任务失败状态
+        update_task_status(
+            request.doc_id,
+            status=TaskStatus.FAILED,
+            error_message=str(e),
+            completed_at=datetime.now(timezone(timedelta(hours=8)))
+        )
+        return {"status": "error", "message": str(e)}
+    finally:
+        # 清理临时文件
+        if actual_file_path and os.path.exists(actual_file_path):
+            try:
+                os.unlink(actual_file_path)
+                logger.info(f"临时文件已清理: {actual_file_path}")
+            except Exception as e:
+                logger.warning(f"清理临时文件失败: {e}")

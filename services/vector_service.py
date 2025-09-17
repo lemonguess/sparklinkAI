@@ -91,7 +91,7 @@ class VectorService:
                 logger.info(f"集合已存在: {collection_name}")
                 return True
             
-            # 定义字段
+            # 定义字段（核心字段在前）
             fields = [
                 FieldSchema(
                     name="id",
@@ -106,9 +106,19 @@ class VectorService:
                     max_length=200
                 ),
                 FieldSchema(
-                    name="title",
+                    name="doc_name",
                     dtype=DataType.VARCHAR,
                     max_length=500
+                ),
+                FieldSchema(
+                    name="chunk_content",
+                    dtype=DataType.VARCHAR,
+                    max_length=4000
+                ),
+                FieldSchema(
+                    name="vector",
+                    dtype=DataType.FLOAT_VECTOR,
+                    dim=dimension
                 ),
                 FieldSchema(
                     name="source_path",
@@ -116,7 +126,17 @@ class VectorService:
                     max_length=1000
                 ),
                 FieldSchema(
-                    name="chunk_id",
+                    name="doc_type",
+                    dtype=DataType.VARCHAR,
+                    max_length=50
+                ),
+                FieldSchema(
+                    name="user_id",
+                    dtype=DataType.VARCHAR,
+                    max_length=50
+                ),
+                FieldSchema(
+                    name="group_id",
                     dtype=DataType.INT64
                 ),
                 FieldSchema(
@@ -129,31 +149,8 @@ class VectorService:
                     dtype=DataType.VARCHAR,
                     max_length=20
                 ),
-                FieldSchema(
-                    name="content",
-                    dtype=DataType.VARCHAR,
-                    max_length=4000
-                ),
-                FieldSchema(
-                    name="content_vector",
-                    dtype=DataType.FLOAT_VECTOR,
-                    dim=dimension
-                ),
-                FieldSchema(
-                    name="type_name",
-                    dtype=DataType.VARCHAR,
-                    max_length=50
-                ),
-                FieldSchema(
-                    name="auther_name",
-                    dtype=DataType.VARCHAR,
-                    max_length=200
-                ),
-                FieldSchema(
-                    name="user_id",
-                    dtype=DataType.VARCHAR,
-                    max_length=50
-                )
+
+
             ]
             
             # 创建集合schema
@@ -176,7 +173,7 @@ class VectorService:
             }
 
             collection.create_index(
-                field_name="content_vector",
+                field_name="vector",  # 修正字段名
                 index_params=index_params
             )
             
@@ -198,14 +195,13 @@ class VectorService:
         collection_name: str,
         vector_id: str,
         doc_id: str,
-        title: str,
+        doc_name: str,
         source_path: str,
-        chunk_id: int,
         create_at: str,
         update_at: str,
-        content: str,
-        content_vector: List[float],
-        type_name: str,
+        chunk_content: str,
+        vector: List[float],
+        doc_type: str,
         auther_name: str,
         user_id: str = None
     ) -> bool:
@@ -215,8 +211,8 @@ class VectorService:
             user_id = settings.default_user_id
             
         return await self.insert_vector_async(
-            collection_name, vector_id, doc_id, title, source_path, chunk_id,
-            create_at, update_at, content, content_vector, type_name,
+            collection_name, vector_id, doc_id, doc_name, source_path,
+            create_at, update_at, chunk_content, vector, doc_type,
             auther_name, user_id
         )
     
@@ -225,14 +221,13 @@ class VectorService:
         collection_name: str,
         vector_id: str,
         doc_id: str,
-        title: str,
+        doc_name: str,
         source_path: str,
-        chunk_id: int,
         create_at: str,
         update_at: str,
-        content: str,
-        content_vector: List[float],
-        type_name: str,
+        chunk_content: str,
+        vector: List[float],
+        doc_type: str,
         auther_name: str,
         user_id: str
     ) -> bool:
@@ -272,20 +267,19 @@ class VectorService:
                 except Exception as e:
                     logger.warning(f"删除相同doc_id数据时出错: {e}")
             
-            # 准备数据
+            # 准备数据（按字段定义顺序）
             data = [
                 [vector_id],  # id
                 [doc_id],  # doc_id
-                [title[:500]],  # title (截断)
+                [doc_name[:500]],  # doc_name (截断)
+                [chunk_content[:4000]],  # chunk_content (截断)
+                [vector],  # vector
                 [source_path[:1000]],  # source_path (截断)
-                [chunk_id],  # chunk_id
-                [create_at],  # create_at
-                [update_at],  # update_at
-                [content[:4000]],  # content (截断)
-                [content_vector],  # content_vector
-                [type_name[:50]],  # type_name (截断)
                 [auther_name[:200]],  # auther_name (截断)
-                [user_id]  # user_id
+                [user_id],  # user_id
+                [doc_type[:50]],  # doc_type (截断)
+                [create_at],  # create_at
+                [update_at]  # update_at
             ]
             
             # 插入数据
@@ -325,7 +319,8 @@ class VectorService:
         query_embedding: List[float],
         top_k: int = 10,
         similarity_threshold: float = 0.7,
-        user_id: str = None
+        user_id: str = None,
+        group_id: int = None
     ) -> List[Dict[str, Any]]:
         """搜索向量（异步）"""
         if not self._connected:
@@ -355,18 +350,22 @@ class VectorService:
             }
             
             # 构建过滤表达式
-            filter_expr = None
+            filter_conditions = []
             if user_id:
-                filter_expr = f'user_id == "{user_id}"'
+                filter_conditions.append(f'user_id == "{user_id}"')
+            if group_id is not None:
+                filter_conditions.append(f'group_id == {group_id}')
+            
+            filter_expr = " and ".join(filter_conditions) if filter_conditions else None
             
             # 执行搜索
             results = collection.search(
                 data=[query_embedding],
-                anns_field="content_vector",
+                anns_field="vector",  # 修正字段名
                 param=search_params,
                 limit=top_k,
-                expr=filter_expr,  # 添加用户过滤
-                output_fields=["doc_id", "title", "source_path", "chunk_id", "create_at", "update_at", "content", "type_name", "auther_name", "user_id"]
+                expr=filter_expr,  # 添加用户和分组过滤
+                output_fields=["doc_id", "doc_name", "source_path", "create_at", "update_at", "chunk_content", "doc_type", "auther_name", "user_id", "group_id"]
             )
             
             # 处理结果
@@ -384,15 +383,15 @@ class VectorService:
                         "id": hit.id,
                         "score": score,
                         "doc_id": hit.entity.get("doc_id", ""),
-                        "title": hit.entity.get("title", ""),
+                        "title": hit.entity.get("doc_name", ""),  # 修正字段名
                         "source_path": hit.entity.get("source_path", ""),
-                        "chunk_id": hit.entity.get("chunk_id", 0),
                         "create_at": hit.entity.get("create_at", ""),
                         "update_at": hit.entity.get("update_at", ""),
-                        "content": hit.entity.get("content", ""),
-                        "type_name": hit.entity.get("type_name", ""),
+                        "content": hit.entity.get("chunk_content", ""),
+                        "doc_type": hit.entity.get("doc_type", ""),
                         "auther_name": hit.entity.get("auther_name", ""),
-                        "user_id": hit.entity.get("user_id", "")
+                        "user_id": hit.entity.get("user_id", ""),
+                        "group_id": hit.entity.get("group_id", None)
                     }
                     
                     search_results.append(result)
@@ -449,6 +448,48 @@ class VectorService:
             
         except Exception as e:
             logger.error(f"删除向量失败: {e}")
+            return False
+
+    async def delete_vectors_by_doc_id(
+        self,
+        collection_name: str,
+        doc_id: str
+    ) -> bool:
+        """根据doc_id删除向量"""
+        if not self._connected:
+            await self.connect()
+        
+        if not MILVUS_AVAILABLE or not self._connected:
+            logger.error("Milvus未连接")
+            return False
+        
+        try:
+            # 获取集合
+            if collection_name not in self._collections:
+                if not utility.has_collection(collection_name):
+                    logger.warning(f"集合不存在: {collection_name}")
+                    return False
+                
+                collection = Collection(collection_name)
+                self._collections[collection_name] = collection
+            else:
+                collection = self._collections[collection_name]
+            
+            # 构建删除表达式
+            expr = f'doc_id == "{doc_id}"'
+            
+            # 执行删除
+            collection.delete(expr)
+            
+            # 刷新
+            collection.flush()
+            
+            logger.info(f"根据doc_id删除向量成功: {collection_name}, doc_id: {doc_id}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"根据doc_id删除向量失败: {e}")
             return False
     
     async def drop_collection(self, collection_name: str) -> bool:

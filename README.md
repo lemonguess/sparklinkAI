@@ -12,27 +12,229 @@
 - **多格式支持**: 支持 PDF、Word、PPT、图片等多种文档格式
 - **用户会话管理**: 支持多用户、多会话的聊天管理
 - **UUID用户系统**: 支持UUID格式的用户标识符
+- **知识库分组**: 支持文档分组管理，便于组织和检索
+- **软删除机制**: 支持文档和分组的软删除，保证数据完整性
 
 ## 🏗️ 系统架构
 
+```mermaid
+graph TB
+    subgraph "前端层"
+        UI[🖥️ Web界面<br/>HTML/CSS/JavaScript]
+    end
+    
+    subgraph "API层"
+        API[🚀 FastAPI服务器<br/>• 聊天API<br/>• 知识库API<br/>• 系统管理API]
+    end
+    
+    subgraph "业务逻辑层"
+        CHAT[💬 聊天服务<br/>ChatService]
+        KB[📚 知识库服务<br/>DocumentService]
+        SEARCH[🔍 搜索服务<br/>SearchService]
+        EMB[🧠 嵌入服务<br/>EmbeddingService]
+    end
+    
+    subgraph "任务队列"
+        CELERY[⚡ Celery<br/>• 异步文档处理<br/>• 向量化任务<br/>• 后台任务]
+    end
+    
+    subgraph "数据存储层"
+        MYSQL[(🗄️ MySQL<br/>• 用户数据<br/>• 会话记录<br/>• 文档元数据)]
+        MILVUS[(🔮 Milvus<br/>• 向量存储<br/>• 相似度搜索<br/>• 语义检索)]
+        REDIS[(⚡ Redis<br/>• 缓存<br/>• 会话状态<br/>• 任务队列)]
+        FILES[📁 文件存储<br/>• 上传文档<br/>• 临时文件]
+    end
+    
+    subgraph "外部服务"
+        LLM[🤖 大语言模型<br/>OpenAI/Claude]
+        WEB[🌐 网络搜索<br/>实时信息获取]
+    end
+    
+    UI --> API
+    API --> CHAT
+    API --> KB
+    API --> SEARCH
+    
+    CHAT --> EMB
+    KB --> EMB
+    SEARCH --> EMB
+    
+    EMB --> CELERY
+    KB --> CELERY
+    
+    API --> MYSQL
+    API --> REDIS
+    EMB --> MILVUS
+    KB --> FILES
+    
+    CHAT --> LLM
+    SEARCH --> WEB
+    
+    style UI fill:#e1f5fe
+    style API fill:#f3e5f5
+    style MYSQL fill:#fff3e0
+    style MILVUS fill:#e8f5e8
+    style REDIS fill:#ffebee
+    style CELERY fill:#f1f8e9
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   FastAPI       │    │   Celery        │    │   前端界面       │
-│   Web服务       │◄──►│   异步任务      │    │   (可选)        │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │
-         ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐
-│   MySQL         │    │   Redis         │
-│   关系数据库     │    │   缓存/队列     │
-└─────────────────┘    └─────────────────┘
-         │                       │
-         ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐
-│   Milvus        │    │   外部API       │
-│   向量数据库     │    │   LLM/搜索      │
-└─────────────────┘    └─────────────────┘
+
+## 📊 数据库设计
+
+### MySQL 表结构
+
+#### 用户表 (users)
+```sql
+CREATE TABLE users (
+    id VARCHAR(255) PRIMARY KEY,           -- 用户唯一标识
+    username VARCHAR(255) NOT NULL,        -- 用户名
+    email VARCHAR(255),                    -- 邮箱地址
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP  -- 更新时间
+);
 ```
+
+#### 聊天会话表 (chat_sessions)
+```sql
+CREATE TABLE chat_sessions (
+    id VARCHAR(255) PRIMARY KEY,           -- 会话唯一标识
+    user_id VARCHAR(255) NOT NULL,         -- 用户ID (外键)
+    title VARCHAR(500),                    -- 会话标题
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  -- 更新时间
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+```
+
+#### 聊天消息表 (chat_messages)
+```sql
+CREATE TABLE chat_messages (
+    id INT AUTO_INCREMENT PRIMARY KEY,     -- 消息唯一标识
+    session_id VARCHAR(255) NOT NULL,      -- 会话ID (外键)
+    role ENUM('user', 'assistant') NOT NULL,  -- 消息角色
+    content TEXT NOT NULL,                 -- 消息内容
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
+    FOREIGN KEY (session_id) REFERENCES chat_sessions(id)
+);
+```
+
+#### 知识库分组表 (document_groups)
+```sql
+CREATE TABLE document_groups (
+    id INT AUTO_INCREMENT PRIMARY KEY,     -- 分组唯一标识
+    group_name VARCHAR(255) NOT NULL,      -- 分组名称
+    description TEXT,                      -- 分组描述
+    user_id VARCHAR(255) NOT NULL,         -- 用户ID (外键)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  -- 更新时间
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+```
+
+#### 文档嵌入任务表 (document_embedding_tasks)
+```sql
+CREATE TABLE document_embedding_tasks (
+    task_id VARCHAR(255) PRIMARY KEY,      -- 任务唯一标识
+    doc_id VARCHAR(255) NOT NULL,          -- 文档ID
+    doc_name VARCHAR(255) NOT NULL,        -- 文档名称
+    file_path VARCHAR(500),                -- 文件路径
+    content_type VARCHAR(100),             -- 内容类型
+    user_id VARCHAR(255) NOT NULL,         -- 用户ID (外键)
+    group_id INT,                          -- 分组ID (外键)
+    status ENUM('pending', 'processing', 'completed', 'failed') DEFAULT 'pending',  -- 任务状态
+    is_active BOOLEAN DEFAULT TRUE,        -- 是否激活 (软删除标记)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  -- 更新时间
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (group_id) REFERENCES document_groups(id)
+);
+```
+
+### Milvus 向量数据库集合结构
+
+#### 知识库向量集合 (sparklinkai_knowledge)
+```python
+# 集合字段定义
+fields = [
+    {
+        "name": "id",                    # 主键ID
+        "type": "VARCHAR",
+        "max_length": 100,
+        "is_primary": True,
+        "auto_id": False
+    },
+    {
+        "name": "doc_id",               # 文档ID
+        "type": "VARCHAR", 
+        "max_length": 200
+    },
+    {
+        "name": "doc_name",             # 文档名称
+        "type": "VARCHAR",
+        "max_length": 500
+    },
+    {
+        "name": "chunk_content",        # 文档分块内容
+        "type": "VARCHAR",
+        "max_length": 4000
+    },
+    {
+        "name": "vector",               # 向量数据
+        "type": "FLOAT_VECTOR",
+        "dimension": 1024               # 向量维度 (根据嵌入模型调整)
+    },
+    {
+        "name": "source_path",          # 源文件路径
+        "type": "VARCHAR",
+        "max_length": 1000
+    },
+    {
+        "name": "doc_type",             # 文档类型
+        "type": "VARCHAR",
+        "max_length": 50
+    },
+    {
+        "name": "user_id",              # 用户ID
+        "type": "VARCHAR",
+        "max_length": 50
+    },
+    {
+        "name": "group_id",             # 分组ID
+        "type": "INT64"
+    },
+    {
+        "name": "create_at",            # 创建时间
+        "type": "VARCHAR",
+        "max_length": 20
+    },
+    {
+        "name": "update_at",            # 更新时间
+        "type": "VARCHAR",
+        "max_length": 20
+    }
+]
+
+# 索引配置
+index_params = {
+    "metric_type": "IP",                # 内积相似度 (适合归一化向量)
+    "index_type": "IVF_FLAT",          # 索引类型
+    "params": {"nlist": 1024}          # 索引参数
+}
+```
+
+### 数据关系说明
+
+1. **用户 → 会话**: 一对多关系，一个用户可以有多个聊天会话
+2. **会话 → 消息**: 一对多关系，一个会话包含多条消息
+3. **用户 → 知识库分组**: 一对多关系，一个用户可以创建多个知识库分组
+4. **分组 → 文档任务**: 一对多关系，一个分组可以包含多个文档
+5. **文档任务 → 向量数据**: 一对多关系，一个文档会被分块并生成多个向量
+
+### 软删除机制
+
+- 所有主要实体都支持软删除 (`is_active` 字段)
+- 删除分组时会检查是否存在未删除的子文档
+- 删除文档时会同时清理对应的向量数据
+- 保证数据完整性和可恢复性
 
 ## 🚀 快速开始
 
@@ -76,10 +278,10 @@ redis-server
 5. **启动服务**
 ```bash
 # 启动 FastAPI 服务
-uv run python main.py
+uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload 
 
 # 启动 Celery Worker (新终端)
-uv run python celery_worker.py
+uv run python -m celery -A services.celery_app worker --loglevel=info 
 ```
 
 6. **访问服务**
@@ -126,88 +328,202 @@ MILVUS_PORT=19530
 - 搜索策略配置
 - 性能参数配置
 
-## 🔧 API 使用
+## 🔧 API 接口文档
 
-### 聊天接口
+### 聊天相关接口
 
+#### 1. 发送聊天消息
 ```bash
-# 发送聊天消息
-curl -X POST "http://localhost:8000/api/v1/chat/chat" \
-  -H "Content-Type: application/json" \
-  -d '{
+POST /api/v1/chat/chat
+Content-Type: application/json
+
+{
     "message": "你好，请介绍一下人工智能",
     "user_id": "your-user-id",
     "session_id": "your-session-id",
     "use_knowledge_base": true,
     "use_web_search": true,
     "stream": false
-  }'
+}
+```
 
-# 流式聊天
-curl -X POST "http://localhost:8000/api/v1/chat/chat/stream" \
-  -H "Content-Type: application/json" \
-  -d '{
+#### 2. 流式聊天
+```bash
+POST /api/v1/chat/chat/stream
+Content-Type: application/json
+
+{
     "message": "你好，请介绍一下人工智能",
-    "user_id": "your-user-id",
+    "user_id": "your-user-id", 
     "session_id": "your-session-id",
     "use_knowledge_base": true,
     "use_web_search": true
-  }'
+}
+```
 
-# 创建聊天会话
-curl -X POST "http://localhost:8000/api/v1/chat/create-session" \
-  -H "Content-Type: application/json" \
-  -d '{
+#### 3. 创建聊天会话
+```bash
+POST /api/v1/chat/create-session
+Content-Type: application/json
+
+{
     "user_id": "your-user-id",
     "title": "新的聊天会话"
-  }'
+}
 ```
 
-### 文档上传
-
+#### 4. 获取会话列表
 ```bash
-# 上传文档到知识库
-curl -X POST "http://localhost:8000/api/v1/kb/documents/upload" \
-  -F "file=@document.pdf" \
-  -F "user_id=your-user-id"
-
-# 获取文档列表
-curl -X GET "http://localhost:8000/api/v1/kb/documents?user_id=your-user-id&skip=0&limit=20"
-
-# 获取单个文档信息
-curl -X GET "http://localhost:8000/api/v1/kb/documents/1"
-
-# 删除文档
-curl -X DELETE "http://localhost:8000/api/v1/kb/documents/1"
+GET /api/v1/chat/sessions?user_id=your-user-id&skip=0&limit=20
 ```
 
-### 知识库管理
-
+#### 5. 获取会话消息
 ```bash
-# 创建知识库
-curl -X POST "http://localhost:8000/api/v1/kb/knowledge-bases" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "我的知识库",
-    "description": "用于存储相关文档的知识库"
-  }'
-
-# 获取知识库列表
-curl -X GET "http://localhost:8000/api/v1/kb/knowledge-bases?skip=0&limit=20"
+GET /api/v1/chat/sessions/{session_id}/messages?skip=0&limit=50
 ```
 
-### 知识库搜索
-
+#### 6. 删除会话
 ```bash
-# 搜索知识库
-curl -X POST "http://localhost:8000/api/v1/kb/search" \
-  -H "Content-Type: application/json" \
-  -d '{
+DELETE /api/v1/chat/sessions/{session_id}?user_id=your-user-id
+```
+
+#### 7. 更新会话标题
+```bash
+PUT /api/v1/chat/sessions/{session_id}/title
+Content-Type: application/json
+
+{
+    "title": "新的会话标题"
+}
+```
+
+#### 8. 停止流式响应
+```bash
+POST /api/v1/chat/stop-stream
+Content-Type: application/json
+
+{
+    "request_id": "your-request-id"
+}
+```
+
+### 知识库相关接口
+
+#### 1. 创建知识库分组
+```bash
+POST /api/v1/kb/group/create
+Content-Type: application/json
+
+{
+    "group_name": "我的知识库",
+    "description": "用于存储相关文档的知识库",
+    "user_id": "your-user-id"
+}
+```
+
+#### 2. 获取知识库分组列表
+```bash
+GET /api/v1/kb/group/list?user_id=your-user-id&skip=0&limit=20
+```
+
+#### 3. 更新知识库分组
+```bash
+PUT /api/v1/kb/group/update/{group_id}?user_id=your-user-id
+Content-Type: application/json
+
+{
+    "group_name": "更新后的知识库名称",
+    "description": "更新后的描述"
+}
+```
+
+#### 4. 删除知识库分组
+```bash
+DELETE /api/v1/kb/group/delete?group_id=1&user_id=your-user-id
+```
+
+#### 5. 获取分组内文档列表
+```bash
+POST /api/v1/kb/group/detail
+Content-Type: application/json
+
+{
+    "group_id": 1,
+    "user_id": "your-user-id"
+}
+```
+
+#### 6. 上传文档文件
+```bash
+POST /api/v1/kb/tasks/file_process
+Content-Type: multipart/form-data
+
+file: [文档文件]
+user_id: your-user-id
+group_id: 1 (可选)
+```
+
+#### 7. 处理文本内容
+```bash
+POST /api/v1/kb/tasks/post_process
+Content-Type: application/json
+
+{
+    "content": "要处理的文本内容",
+    "title": "文档标题",
+    "user_id": "your-user-id",
+    "group_id": 1
+}
+```
+
+#### 8. 获取任务状态
+```bash
+GET /api/v1/kb/tasks/{task_id}/status
+```
+
+#### 9. 删除文档
+```bash
+DELETE /api/v1/kb/document/delete?doc_id=your-doc-id&user_id=your-user-id
+```
+
+#### 10. 搜索知识库
+```bash
+POST /api/v1/kb/search
+Content-Type: application/json
+
+{
     "query": "人工智能的发展历史",
     "top_k": 10,
     "similarity_threshold": 0.7,
     "collection_name": "kb_12345678"
-  }'
+}
+```
+
+### 系统相关接口
+
+#### 1. 健康检查
+```bash
+GET /health
+```
+
+#### 2. 系统状态
+```bash
+GET /api/v1/system/status
+```
+
+#### 3. 系统统计
+```bash
+GET /api/v1/system/stats
+```
+
+#### 4. 数据库状态
+```bash
+GET /api/v1/system/db-status
+```
+
+#### 5. 系统配置
+```bash
+GET /api/v1/system/config
 ```
 
 ## 🧠 智能搜索

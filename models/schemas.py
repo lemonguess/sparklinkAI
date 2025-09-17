@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 import json
+from models.enums import DocType
 
 # 自定义JSON编码器，统一时间格式
 class CustomJSONEncoder(json.JSONEncoder):
@@ -87,6 +88,10 @@ class ChatSessionDelete(BaseModel):
     """删除聊天会话请求模型"""
     session_id: str
 
+class ChatMessageDelete(BaseModel):
+    """删除聊天消息请求模型"""
+    message_id: str = Field(..., description="要删除的消息ID")
+
 class ChatSessionUpdateTitle(BaseModel):
     """修改会话标题请求模型"""
     session_id: str
@@ -98,6 +103,77 @@ class ChatResponse(BaseModel):
     session_id: str
     knowledge_sources: Optional[List[Dict[str, Any]]] = None
     web_search_results: Optional[List[Dict[str, Any]]] = None
+
+# 文档嵌入任务相关模型
+# 知识库文档分组相关模型
+class DocumentGroupCreate(BaseModel):
+    """创建知识库分组请求模型"""
+    group_name: str = Field(..., min_length=1, max_length=255, description="知识库分组名称")
+    description: Optional[str] = Field(None, max_length=1000, description="知识库分组描述")
+    user_id: str = Field(..., description="用户ID")
+
+class DocumentGroupResponse(BaseModel):
+    """知识库分组响应模型"""
+    id: int
+    user_id: str
+    group_name: str
+    description: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool
+    
+    class Config:
+        from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.strftime('%Y-%m-%d %H:%M:%S')
+        }
+
+class DocumentGroupUpdate(BaseModel):
+    """更新知识库分组请求模型"""
+    group_name: Optional[str] = Field(None, min_length=1, max_length=255, description="知识库分组名称")
+    description: Optional[str] = Field(None, max_length=1000, description="知识库分组描述")
+
+class DocumentEmbeddingTaskRequest(BaseModel):
+    """文档嵌入任务请求模型"""
+    file_path: str = Field(..., description="文件路径或URL")
+    doc_type: DocType = Field(..., description="文档类型 (file 或 post)")
+    doc_id: Optional[str] = Field(None, description="文档ID")
+    doc_content: str = Field("", description="文档内容")
+    user_id: str = Field(..., description="用户ID")
+    group_id: Optional[int] = Field(None, description="分组ID")
+    
+    class Config:
+        from_attributes = True
+        use_enum_values = True  # 使用枚举值而不是枚举对象
+
+# 知识库相关模型
+class DocumentProcessRequest(BaseModel):
+    """文档处理请求模型"""
+    file_url: Optional[str] = None
+    user_id: Optional[str] = None
+
+class PostProcessRequest(BaseModel):
+    """POST类型文档处理请求模型"""
+    content: str = Field(..., min_length=1, max_length=50000, description="文档内容")
+    title: Optional[str] = Field(None, max_length=200, description="文档标题")
+    user_id: Optional[str] = Field(None, description="用户ID")
+    group_id: Optional[int] = Field(None, description="分组ID")
+    
+class DocumentQueryRequest(BaseModel):
+    """文档查询请求模型"""
+    query: str = Field(..., min_length=1, max_length=1000)
+    user_id: Optional[str] = None
+    group_id: Optional[int] = Field(None, description="分组ID，用于指定查询的知识库")
+    top_k: int = Field(10, ge=1, le=100)
+    similarity_threshold: float = Field(0.7, ge=0.0, le=1.0)
+    collection_name: Optional[str] = None
+
+class KnowledgeSearchRequest(BaseModel):
+    """知识库搜索请求模型"""
+    query: str = Field(..., min_length=1, max_length=1000)
+    top_k: int = Field(10, ge=1, le=100)
+    similarity_threshold: float = Field(0.7, ge=0.0, le=1.0)
+    collection_name: Optional[str] = None
     response_time: Optional[float] = None
 
 # 知识库相关模型

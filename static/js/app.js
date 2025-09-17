@@ -2,8 +2,10 @@
 class SparkLinkApp {
     constructor() {
         this.currentSessionId = null;
+        this.currentKnowledgeBaseId = null;
         this.sessions = [];
         this.knowledgeBases = [];
+        this.documents = [];
         this.messageCache = new Map(); // 缓存会话消息，避免重复加载
         this.settings = {
             maxTokens: 2000,
@@ -81,6 +83,15 @@ class SparkLinkApp {
         
         // 上传文档
         document.getElementById('uploadDocBtn').addEventListener('click', () => this.showUploadModal());
+        
+        // 刷新文档
+        document.getElementById('refreshDocsBtn').addEventListener('click', () => this.loadDocuments());
+        
+        // 新建知识库
+        document.getElementById('newKnowledgeBaseBtn').addEventListener('click', () => this.showNewKnowledgeBaseModal());
+        
+        // 知识库检索测试
+        document.getElementById('testKnowledgeBtn').addEventListener('click', () => this.showTestKnowledgeModal());
         
         // 设置
         document.getElementById('settingsBtn').addEventListener('click', () => this.showSettingsModal());
@@ -192,7 +203,12 @@ class SparkLinkApp {
     
     async loadKnowledgeBases() {
         try {
-            const response = await fetch('/api/v1/knowledge_base/knowledge_bases');
+            const response = await fetch('/api/v1/kb/group/get_groups?user_id=test_user', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
             if (response.ok) {
                 const data = await response.json();
                 this.knowledgeBases = data.data || [];
@@ -262,30 +278,166 @@ class SparkLinkApp {
     
     renderKnowledgeBases() {
         const knowledgeList = document.getElementById('knowledgeList');
-        knowledgeList.innerHTML = '';
+        if (!knowledgeList) return;
         
-        this.knowledgeBases.forEach(kb => {
-            const kbElement = document.createElement('div');
-            kbElement.className = 'knowledge-item';
-            kbElement.innerHTML = `
-                <div class="knowledge-title">${kb.name}</div>
-                <div class="knowledge-info">${kb.document_count} 文档 · ${kb.chunk_count} 块</div>
-            `;
-            
-            knowledgeList.appendChild(kbElement);
+        if (this.knowledgeBases.length === 0) {
+            knowledgeList.innerHTML = '<div class="empty-state">暂无知识库</div>';
+            return;
+        }
+        
+        knowledgeList.innerHTML = this.knowledgeBases.map(kb => `
+            <div class="knowledge-item ${this.currentKnowledgeBaseId === kb.id ? 'active' : ''}" data-id="${kb.id}">
+                <div class="knowledge-item-header">
+                    <div class="knowledge-item-title">${kb.group_name}</div>
+                    <div class="knowledge-item-actions">
+                        <button class="btn-icon" onclick="app.editKnowledgeBase(${kb.id}, '${kb.group_name}')" title="编辑">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn-icon" onclick="app.deleteKnowledgeBase(${kb.id}, '${kb.group_name}')" title="删除">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="knowledge-item-info">
+                    <span>文档: ${kb.doc_name || '未命名'}</span>
+                    <span class="knowledge-item-count">ID: ${kb.id}</span>
+                </div>
+            </div>
+        `).join('');
+        
+        // 添加点击事件选择知识库
+        knowledgeList.querySelectorAll('.knowledge-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                if (!e.target.closest('.knowledge-item-actions')) {
+                    const kbId = parseInt(item.dataset.id);
+                    this.selectKnowledgeBase(kbId);
+                }
+            });
         });
     }
     
-    updateKnowledgeBaseSelect() {
-        const select = document.getElementById('kbSelect');
-        select.innerHTML = '';
+    // 选择知识库
+    async selectKnowledgeBase(kbId) {
+        this.currentKnowledgeBaseId = kbId;
         
-        this.knowledgeBases.forEach(kb => {
-            const option = document.createElement('option');
-            option.value = kb.id;
-            option.textContent = kb.name;
-            select.appendChild(option);
-        });
+        // 更新知识库列表显示
+        this.renderKnowledgeBases();
+        
+        // 更新文档面板标题
+        const selectedKb = this.knowledgeBases.find(kb => kb.id === kbId);
+        const kbTitle = document.getElementById('selectedKbTitle');
+        if (kbTitle && selectedKb) {
+            kbTitle.textContent = selectedKb.group_name;
+        }
+        
+        // 显示文档面板
+        const documentPanel = document.getElementById('documentPanel');
+        if (documentPanel) {
+            documentPanel.style.display = 'block';
+        }
+        
+        // 加载该知识库的文档
+        await this.loadDocuments();
+    }
+    
+    // 加载文档列表
+    async loadDocuments() {
+        if (!this.currentKnowledgeBaseId) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/knowledge_base/${this.currentKnowledgeBaseId}/documents`);
+            if (response.ok) {
+                this.documents = await response.json();
+                this.renderDocuments();
+            } else {
+                console.error('Failed to load documents');
+                this.showToast('加载文档失败', 'error');
+            }
+        } catch (error) {
+            console.error('Error loading documents:', error);
+            this.showToast('加载文档失败', 'error');
+        }
+    }
+    
+    // 渲染文档列表
+    renderDocuments() {
+        const documentList = document.getElementById('documentList');
+        if (!documentList) return;
+        
+        if (this.documents.length === 0) {
+            documentList.innerHTML = '<div class="empty-state">暂无文档</div>';
+            return;
+        }
+        
+        documentList.innerHTML = this.documents.map(doc => `
+            <div class="document-item" data-id="${doc.id}">
+                <div class="document-info">
+                    <div class="document-name">${doc.name}</div>
+                    <div class="document-meta">
+                        <span>大小: ${this.formatFileSize(doc.size || 0)}</span>
+                        <span>上传时间: ${this.formatTime(doc.created_at)}</span>
+                    </div>
+                </div>
+                <div class="document-actions">
+                    <button class="btn-icon" onclick="app.deleteDocument(${doc.id}, '${doc.name}')" title="删除">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    // 格式化文件大小
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+    
+    // 删除文档
+    async deleteDocument(docId, docName) {
+        if (!confirm(`确定要删除文档 "${docName}" 吗？`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/documents/${docId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                this.showToast('文档删除成功', 'success');
+                await this.loadDocuments(); // 重新加载文档列表
+            } else {
+                this.showToast('文档删除失败', 'error');
+            }
+        } catch (error) {
+            console.error('Error deleting document:', error);
+            this.showToast('文档删除失败', 'error');
+        }
+    }
+
+    updateKnowledgeBaseSelect() {
+        const kbSelect = document.getElementById('kbSelect');
+        const testKbSelect = document.getElementById('testKbSelect');
+        
+        if (kbSelect) {
+            kbSelect.innerHTML = '<option value="">选择知识库</option>' + 
+                this.knowledgeBases.map(kb => 
+                    `<option value="${kb.id}">${kb.group_name}</option>`
+                ).join('');
+        }
+        
+        if (testKbSelect) {
+            testKbSelect.innerHTML = '<option value="">全部知识库</option>' + 
+                this.knowledgeBases.map(kb => 
+                    `<option value="${kb.id}">${kb.group_name}</option>`
+                ).join('');
+        }
     }
     
     updateSystemStatus(status) {
@@ -977,6 +1129,16 @@ class SparkLinkApp {
         document.getElementById('uploadModal').style.display = 'block';
     }
     
+    showNewKnowledgeBaseModal() {
+        document.getElementById('newKnowledgeBaseModal').style.display = 'block';
+        this.bindNewKnowledgeBaseEvents();
+    }
+    
+    showTestKnowledgeModal() {
+        document.getElementById('testKnowledgeModal').style.display = 'block';
+        this.bindTestKnowledgeEvents();
+    }
+    
     showSettingsModal() {
         // 加载当前设置到表单
         document.getElementById('maxTokens').value = this.settings.maxTokens;
@@ -1018,7 +1180,6 @@ class SparkLinkApp {
     async uploadFiles() {
         console.log("uploadFiles called.");
         const fileInput = document.getElementById('fileInput');
-        const kbSelect = document.getElementById('kbSelect');
         console.log("fileInput in uploadFiles:", fileInput);
         
         // 检查元素是否存在
@@ -1027,8 +1188,8 @@ class SparkLinkApp {
             return;
         }
         
-        if (!kbSelect) {
-            this.showToast('知识库选择元素未找到', 'error');
+        if (!this.currentKnowledgeBaseId) {
+            this.showToast('请先选择知识库', 'error');
             return;
         }
         
@@ -1037,12 +1198,6 @@ class SparkLinkApp {
         // 检查files是否存在
         if (!files || files.length === 0) {
             this.showToast('请选择要上传的文件', 'warning');
-            return;
-        }
-        
-        const knowledgeBaseId = kbSelect.value;
-        if (!knowledgeBaseId) {
-            this.showToast('请选择知识库', 'warning');
             return;
         }
         
@@ -1056,9 +1211,9 @@ class SparkLinkApp {
                 const file = fileArray[i];
                 const formData = new FormData();
                 formData.append('file', file);
-                formData.append('knowledge_base_id', knowledgeBaseId);
+                formData.append('knowledge_base_id', this.currentKnowledgeBaseId);
                 
-                const response = await fetch('/api/v1/knowledge_base/documents/upload', {
+                const response = await fetch('/api/v1/kb/documents/upload', {
                     method: 'POST',
                     body: formData
                 });
@@ -1075,7 +1230,8 @@ class SparkLinkApp {
             
             this.showToast('文件上传成功', 'success');
             this.hideUploadModal();
-            this.loadKnowledgeBases(); // 刷新知识库列表
+            await this.loadDocuments(); // 重新加载文档列表
+            await this.loadKnowledgeBases(); // 刷新知识库列表
             
         } catch (error) {
             console.error('上传失败:', error);
@@ -1117,6 +1273,255 @@ class SparkLinkApp {
             <input type="file" id="fileInput" multiple accept=".pdf,.doc,.docx,.txt,.md,.ppt,.pptx">
         `;
         this.bindFileUploadEvents();
+    }
+    
+    bindNewKnowledgeBaseEvents() {
+        // 选项卡切换
+        const tabBtns = document.querySelectorAll('#newKnowledgeBaseModal .tab-btn');
+        const tabContents = document.querySelectorAll('#newKnowledgeBaseModal .tab-content');
+        
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tabName = btn.dataset.tab;
+                
+                // 更新按钮状态
+                tabBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                // 更新内容显示
+                tabContents.forEach(content => {
+                    content.classList.remove('active');
+                    if (content.id === tabName + 'Tab') {
+                        content.classList.add('active');
+                    }
+                });
+            });
+        });
+        
+        // 文件上传区域
+        const uploadArea = document.getElementById('newKbUploadArea');
+        const fileInput = document.getElementById('newKbFileInput');
+        
+        if (uploadArea && fileInput) {
+            uploadArea.addEventListener('click', () => fileInput.click());
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('drag-over');
+            });
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('drag-over');
+            });
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('drag-over');
+                fileInput.files = e.dataTransfer.files;
+            });
+        }
+        
+        // 按钮事件
+        document.getElementById('createKbBtn').addEventListener('click', () => this.createKnowledgeBase());
+        document.getElementById('cancelNewKbBtn').addEventListener('click', () => this.hideNewKnowledgeBaseModal());
+    }
+    
+    bindTestKnowledgeEvents() {
+        // 相似度滑块
+        const similaritySlider = document.getElementById('testSimilarity');
+        const similarityValue = document.getElementById('testSimilarityValue');
+        
+        if (similaritySlider && similarityValue) {
+            similaritySlider.addEventListener('input', () => {
+                similarityValue.textContent = similaritySlider.value;
+            });
+        }
+        
+        // 按钮事件
+        document.getElementById('runTestBtn').addEventListener('click', () => this.runKnowledgeTest());
+        document.getElementById('cancelTestBtn').addEventListener('click', () => this.hideTestKnowledgeModal());
+    }
+    
+    hideNewKnowledgeBaseModal() {
+        document.getElementById('newKnowledgeBaseModal').style.display = 'none';
+        
+        // 重置表单
+        document.getElementById('kbGroupName').value = '';
+        const descriptionField = document.getElementById('kbDescription');
+        if (descriptionField) {
+            descriptionField.value = '';
+        }
+    }
+    
+    hideTestKnowledgeModal() {
+        document.getElementById('testKnowledgeModal').style.display = 'none';
+        
+        // 重置表单
+        document.getElementById('testKbSelect').value = '';
+        document.getElementById('testQuery').value = '';
+        document.getElementById('testTopK').value = '5';
+        document.getElementById('testSimilarity').value = '0.7';
+        document.getElementById('testSimilarityValue').textContent = '0.7';
+        
+        // 隐藏结果
+        document.getElementById('testResults').style.display = 'none';
+        document.getElementById('testResultsList').innerHTML = '';
+    }
+    
+    async createKnowledgeBase() {
+        const groupName = document.getElementById('kbGroupName').value.trim();
+        const description = document.getElementById('kbDescription').value.trim();
+        
+        if (!groupName) {
+            this.showToast('请输入知识库名称', 'error');
+            return;
+        }
+        
+        try {
+            // 创建知识库分组（仅创建分组）
+            const groupResponse = await fetch('/api/v1/kb/group/create_group', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    group_name: groupName,
+                    description: description || '',
+                    user_id: 'test_user'
+                })
+            });
+            
+            if (!groupResponse.ok) {
+                throw new Error('创建知识库失败');
+            }
+            
+            this.showToast('知识库创建成功', 'success');
+            
+            // 刷新知识库列表
+            await this.loadKnowledgeBases();
+            this.hideNewKnowledgeBaseModal();
+            
+        } catch (error) {
+            console.error('创建知识库失败:', error);
+            this.showToast('创建知识库失败: ' + error.message, 'error');
+        }
+    }
+    
+    async runKnowledgeTest() {
+        const query = document.getElementById('testQuery').value.trim();
+        const groupId = document.getElementById('testKbSelect').value;
+        const topK = parseInt(document.getElementById('testTopK').value);
+        const similarity = parseFloat(document.getElementById('testSimilarity').value);
+        
+        if (!query) {
+            this.showToast('请输入查询内容', 'error');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/v1/kb/query', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    query: query,
+                    user_id: 'test_user',
+                    group_id: groupId ? parseInt(groupId) : null,
+                    top_k: topK,
+                    similarity_threshold: similarity
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('检索失败');
+            }
+            
+            const data = await response.json();
+            this.displayTestResults(data.data || []);
+            
+        } catch (error) {
+            console.error('知识库检索失败:', error);
+            this.showToast('检索失败: ' + error.message, 'error');
+        }
+    }
+    
+    displayTestResults(results) {
+        const resultsContainer = document.getElementById('testResults');
+        const resultsList = document.getElementById('testResultsList');
+        
+        if (results.length === 0) {
+            resultsList.innerHTML = '<div class="no-results">未找到相关内容</div>';
+        } else {
+            resultsList.innerHTML = results.map(result => `
+                <div class="result-item">
+                    <div class="result-header">
+                        <div class="result-title">${result.title || '未命名'}</div>
+                        <div class="result-score">${(result.score * 100).toFixed(1)}%</div>
+                    </div>
+                    <div class="result-content">${result.content.substring(0, 200)}${result.content.length > 200 ? '...' : ''}</div>
+                    <div class="result-meta">
+                        <span>来源: ${result.source_path || '未知'}</span>
+                        <span class="result-group">分组ID: ${result.group_id || '未知'}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        resultsContainer.style.display = 'block';
+    }
+    
+    async editKnowledgeBase(id, currentName) {
+        const newName = prompt('请输入新的知识库名称:', currentName);
+        if (!newName || newName === currentName) return;
+        
+        try {
+            const response = await fetch(`/api/v1/kb/group/update_group?user_id=test_user`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    group_id: id,
+                    group_name: newName
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('更新失败');
+            }
+            
+            this.showToast('知识库更新成功', 'success');
+            await this.loadKnowledgeBases();
+            
+        } catch (error) {
+            console.error('更新知识库失败:', error);
+            this.showToast('更新失败: ' + error.message, 'error');
+        }
+    }
+    
+    async deleteKnowledgeBase(id, name) {
+        if (!confirm(`确定要删除知识库"${name}"吗？此操作不可恢复。`)) return;
+        
+        try {
+            const response = await fetch(`/api/v1/kb/group/delete_group?user_id=test_user`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    group_id: id
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('删除失败');
+            }
+            
+            this.showToast('知识库删除成功', 'success');
+            await this.loadKnowledgeBases();
+            
+        } catch (error) {
+            console.error('删除知识库失败:', error);
+            this.showToast('删除失败: ' + error.message, 'error');
+        }
     }
     
     saveSettings() {

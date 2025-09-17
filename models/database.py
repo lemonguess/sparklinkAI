@@ -2,9 +2,10 @@
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import uuid
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, ForeignKey, Enum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+from .enums import DocType, TaskStatus
 
 # 上海时区
 SHANGHAI_TZ = timezone(timedelta(hours=8))
@@ -28,6 +29,7 @@ class User(Base):
     
     # 关系
     sessions = relationship("ChatSession", back_populates="user")
+    embedding_tasks = relationship("DocumentEmbeddingTask", back_populates="user")
     documents = relationship("Document", back_populates="user")
 
 class ChatSession(Base):
@@ -65,3 +67,46 @@ class ChatMessage(Base):
     
     # 关系
     session = relationship("ChatSession", back_populates="messages")
+
+class Document(Base):
+    """知识库分组表"""
+    __tablename__ = "documents"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)  # 自增ID，作为group_id
+    user_id = Column(String(32), ForeignKey("users.id"), nullable=False)
+    group_name = Column(String(255), nullable=False)  # 知识库分组名称
+    description = Column(Text, nullable=True)  # 知识库分组描述
+    created_at = Column(DateTime, default=get_shanghai_time)
+    updated_at = Column(DateTime, default=get_shanghai_time, onupdate=get_shanghai_time)
+    is_active = Column(Boolean, default=True)
+    
+    # 关系
+    user = relationship("User", back_populates="documents")
+    embedding_tasks = relationship("DocumentEmbeddingTask", back_populates="document")
+
+class DocumentEmbeddingTask(Base):
+    """文档嵌入处理任务表"""
+    __tablename__ = "document_embedding_tasks"
+    task_id = Column(String(64), primary_key=True, index=True)  # Celery任务ID
+    user_id = Column(String(32), ForeignKey("users.id"), nullable=False)
+    group_id = Column(Integer, ForeignKey("documents.id"), nullable=True)  # 文档所属组ID，关联Document表
+    doc_name = Column(String(255), nullable=False)  # 文档文件名
+    doc_path = Column(String(500), nullable=True)  # 文档路径（可选）
+    doc_id = Column(String(500), nullable=True)  # 文档ID，用于唯一标识文档
+    doc_content = Column(Text, nullable=True)  # 文档内容，仅限于doc_type==post的情况
+    doc_type = Column(Enum(DocType), nullable=True)  # 文档类型,文件或帖子(files or posts)
+    status = Column(Enum(TaskStatus), nullable=False, default=TaskStatus.PENDING)  # pending, processing, completed, failed
+    progress = Column(Float, default=0.0)  # 进度百分比 0.0-100.0
+    result = Column(Text, nullable=True)  # 任务处理结果
+    total_chunks = Column(Integer, default=0)  # 总分块数
+    processed_chunks = Column(Integer, default=0)  # 已处理分块数
+    error_message = Column(Text, nullable=True)  # 错误信息
+    is_active = Column(Boolean, default=True, nullable=False)  # 是否激活（软删除标记）
+    created_at = Column(DateTime, default=get_shanghai_time)
+    updated_at = Column(DateTime, default=get_shanghai_time, onupdate=get_shanghai_time)
+    started_at = Column(DateTime, nullable=True)  # 开始处理时间
+    completed_at = Column(DateTime, nullable=True)  # 完成时间
+    
+    # 关系
+    user = relationship("User", back_populates="embedding_tasks")
+    document = relationship("Document", back_populates="embedding_tasks")

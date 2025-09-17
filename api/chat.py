@@ -12,7 +12,8 @@ from core.database import get_db
 from core.config import settings
 from models.schemas import (
     ChatRequest, ChatResponse, ChatSessionCreate, ChatSessionResponse,
-    ChatSessionDelete, ChatSessionUpdateTitle, ChatMessage, BaseResponse
+    ChatSessionDelete, ChatSessionUpdateTitle, ChatMessage, BaseResponse,
+    ChatMessageDelete
 )
 from models.database import ChatSession, ChatMessage as DBChatMessage, User
 from services.chat_service import ChatService
@@ -147,6 +148,34 @@ async def update_session_title(
         raise
     except Exception as e:
         logger.error(f"修改会话标题失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/messages/delete", response_model=BaseResponse)
+async def delete_chat_message(
+    request: ChatMessageDelete,
+    db: Session = Depends(get_db)
+):
+    """删除聊天消息（物理删除）"""
+    try:
+        # 检查消息是否存在
+        message = db.query(DBChatMessage).filter(DBChatMessage.id == request.message_id).first()
+        if not message:
+            raise HTTPException(status_code=404, detail="消息不存在")
+        
+        # 物理删除消息
+        db.delete(message)
+        db.commit()
+        
+        return BaseResponse(
+            success=True,
+            message="消息删除成功",
+            data={"message_id": request.message_id}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除消息失败: {e}")
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/sessions/{session_id}/messages", response_model=BaseResponse)

@@ -10,7 +10,6 @@ from core.config import settings
 from core.database import get_redis, get_db
 from core.shared_state import active_streams
 from models.database import ChatMessage as DBChatMessage
-from services.knowledge_service import KnowledgeService
 from services.search_service import SearchService
 from models.enums import SearchStrategy
 from utils.extract_keyword import extract_keywords, need_web_search
@@ -32,7 +31,8 @@ class ChatService:
         self.db = db  # 数据库会话
         
         # 集成搜索服务
-        self.knowledge_service = KnowledgeService()
+        # 使用SearchService替代KnowledgeService
+        self.knowledge_service = SearchService()
         self.search_service = SearchService()
     
     async def intelligent_search(

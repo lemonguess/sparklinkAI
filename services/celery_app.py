@@ -8,7 +8,7 @@ celery_app = Celery(
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
     include=[
-        "app.services.tasks.embedding_tasks"
+        "services.tasks.embedding_tasks"
     ]
 )
 
@@ -27,7 +27,7 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_disable_rate_limits=False,
     task_routes={
-        "app.services.tasks.embedding_tasks.*": {"queue": "embedding"},
+        "services.tasks.embedding_tasks.*": {"queue": "embedding"},
     },
     task_default_queue="default",
     task_create_missing_queues=True,

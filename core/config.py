@@ -161,6 +161,27 @@ class Settings:
     def default_user_id(self) -> str:
         """获取默认用户ID"""
         return self.config.get('default_user', 'id', fallback='admin123456789abcdef0123456789abcdef')
+    
+    @property
+    def upload_dir(self) -> str:
+        """获取文件上传目录"""
+        return self.config.get('upload', 'upload_dir', fallback='uploads')
+    
+    @property
+    def max_file_size(self) -> int:
+        """获取最大文件上传大小（字节）"""
+        return self.config.getint('upload', 'max_file_size', fallback=10485760)  # 默认10MB
+    
+    @property
+    def allowed_file_types(self) -> List[str]:
+        """获取允许的文件类型"""
+        types_str = self.config.get('upload', 'allowed_file_types', fallback='["pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "jpg", "png", "gif"]')
+        # 简单解析配置文件中的列表格式
+        import json
+        try:
+            return json.loads(types_str.replace("'", '"'))
+        except:
+            return ["pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "jpg", "png", "gif"]
 
 # 全局配置实例
 settings = Settings()

@@ -16,6 +16,51 @@ from sqlalchemy.orm import sessionmaker
 from core.config import settings
 from core.database import Base
 from models.database import User
+from services.vector_service import VectorService
+
+def reset_milvus():
+    """重置Milvus集合"""
+    print("开始重置Milvus集合...")
+    
+    try:
+        vector_service = VectorService()
+        
+        # 连接到Milvus
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # 连接
+        connected = loop.run_until_complete(vector_service.connect())
+        if not connected:
+            print("无法连接到Milvus，跳过集合重置")
+            return
+        
+        # 删除现有集合
+        collection_name = settings.MILVUS_COLLECTION_NAME
+        try:
+            print(f"正在删除集合: {collection_name}")
+            result = loop.run_until_complete(vector_service.drop_collection(collection_name))
+            if result:
+                print("Milvus集合已删除")
+            else:
+                print("Milvus集合删除失败或不存在")
+        except Exception as e:
+            print(f"删除集合时出错: {e}")
+        
+        # 重新创建集合
+        print("正在创建新的Milvus集合...")
+        result = loop.run_until_complete(vector_service.create_collection(collection_name))
+        if result:
+            print("Milvus集合已创建")
+        else:
+            print("Milvus集合创建失败")
+        
+        loop.close()
+        
+    except Exception as e:
+        print(f"Milvus重置失败: {e}")
+        # 不抛出异常，允许继续执行
 
 def reset_database():
     """重置数据库：删除所有表并重新创建"""
@@ -25,10 +70,22 @@ def reset_database():
     engine = create_engine(settings.database_url, echo=True)
     
     try:
+        # 禁用外键检查
+        print("正在禁用外键检查...")
+        with engine.connect() as conn:
+            conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+            conn.commit()
+        
         # 删除所有表
         print("正在删除所有表...")
         Base.metadata.drop_all(bind=engine)
         print("所有表已删除")
+        
+        # 启用外键检查
+        print("正在启用外键检查...")
+        with engine.connect() as conn:
+            conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+            conn.commit()
         
         # 重新创建所有表
         print("正在创建所有表...")
@@ -99,6 +156,9 @@ def main():
         
         # 重置数据库
         engine = reset_database()
+        
+        # 重置Milvus集合
+        reset_milvus()
         
         # 创建默认用户
         create_default_user(engine)

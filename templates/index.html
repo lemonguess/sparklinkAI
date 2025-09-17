@@ -41,9 +41,14 @@
             <div class="knowledge-section">
                 <div class="section-header">
                     <h3><i class="fas fa-database"></i> 知识库</h3>
-                    <button id="uploadDocBtn" class="btn-icon" title="上传文档">
-                        <i class="fas fa-upload"></i>
-                    </button>
+                    <div class="header-actions">
+                        <button id="newKnowledgeBaseBtn" class="btn-icon" title="新建知识库">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                        <button id="testKnowledgeBtn" class="btn-icon" title="测试检索">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
                 </div>
                 <div id="knowledgeList" class="knowledge-list">
                     <!-- 知识库列表将在这里动态加载 -->
@@ -74,6 +79,24 @@
         
         <!-- 主内容区 -->
         <div class="main-content">
+            <!-- 文档管理区域 -->
+            <div class="document-panel" id="documentPanel" style="display: none;">
+                <div class="document-header">
+                    <h3 id="selectedKbName">请选择知识库</h3>
+                    <div class="document-actions">
+                        <button class="btn-icon" id="uploadDocBtn" title="上传文档">
+                            <i class="fas fa-upload"></i>
+                        </button>
+                        <button class="btn-icon" id="refreshDocsBtn" title="刷新文档">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="document-list" id="documentList">
+                    <!-- 文档列表将在这里动态生成 -->
+                </div>
+            </div>
+            
             <!-- 聊天头部 -->
             <div class="chat-header">
                 <div class="chat-title">
@@ -141,6 +164,71 @@
     </div>
     
     <!-- 模态框 -->
+    <!-- 新建知识库模态框 -->
+    <div id="newKnowledgeBaseModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>新建知识库</h3>
+                <span class="close" onclick="app.hideNewKnowledgeBaseModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="kbGroupName">知识库名称 *</label>
+                    <input type="text" id="kbGroupName" placeholder="请输入知识库名称" required>
+                </div>
+                <div class="form-group">
+                    <label for="kbDescription">描述（可选）</label>
+                    <textarea id="kbDescription" placeholder="请输入知识库描述" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="cancelNewKbBtn">取消</button>
+                <button type="button" class="btn btn-primary" id="createKbBtn">创建</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 知识库检索测试模态框 -->
+    <div id="testKnowledgeModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-search"></i> 知识库检索测试</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="testKbSelect">选择知识库:</label>
+                    <select id="testKbSelect">
+                        <option value="">全部知识库</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="testQuery">查询内容:</label>
+                    <textarea id="testQuery" rows="3" placeholder="请输入要检索的内容..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="testTopK">返回结果数量:</label>
+                    <input type="number" id="testTopK" value="5" min="1" max="20">
+                </div>
+                <div class="form-group">
+                    <label for="testSimilarity">相似度阈值:</label>
+                    <input type="range" id="testSimilarity" min="0" max="1" step="0.05" value="0.7">
+                    <span id="testSimilarityValue">0.7</span>
+                </div>
+                <div id="testResults" class="test-results" style="display: none;">
+                    <h4>检索结果:</h4>
+                    <div id="testResultsList" class="results-list">
+                        <!-- 检索结果将在这里显示 -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelTestBtn" class="btn-secondary">取消</button>
+                <button id="runTestBtn" class="btn-primary">开始检索</button>
+            </div>
+        </div>
+    </div>
+    
     <!-- 文档上传模态框 -->
     <div id="uploadModal" class="modal">
         <div class="modal-content">

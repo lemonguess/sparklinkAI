@@ -12,6 +12,7 @@ from core.config import settings
 from core.database import db_manager
 from api import chat, knowledge_base, system
 from models.schemas import BaseResponse
+from utils.user_utils import create_default_user
 
 # 配置日志
 logging.basicConfig(
@@ -44,6 +45,22 @@ async def lifespan(app: FastAPI):
         logger.info("Redis连接正常")
     else:
         logger.error("Redis连接失败")
+    
+    # 创建默认用户
+    try:
+        create_default_user()
+        logger.info("默认用户检查/创建完成")
+    except Exception as e:
+        logger.error(f"默认用户创建失败: {e}")
+    
+    # 创建上传目录
+    try:
+        import os
+        upload_dir = settings.upload_dir
+        os.makedirs(upload_dir, exist_ok=True)
+        logger.info(f"上传目录创建/检查完成: {upload_dir}")
+    except Exception as e:
+        logger.error(f"上传目录创建失败: {e}")
     
     logger.info("SparkLink AI 应用启动完成")
     

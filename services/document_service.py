@@ -1,7 +1,7 @@
 """文档处理服务"""
 import os
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 import mimetypes
 
 logger = logging.getLogger(__name__)
@@ -10,7 +10,12 @@ class DocumentService:
     """文档处理服务类"""
     
     def __init__(self):
-        pass
+        self.supported_types = {
+            'text/plain', 'text/markdown', 'application/pdf',
+            'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'image/jpeg', 'image/png', 'image/gif'
+        }
     
     def extract_text_from_file(self, file_path: str, file_type: str) -> str:
         """从文件中提取文本内容"""
@@ -115,3 +120,45 @@ class DocumentService:
         except Exception as e:
             logger.error(f"文件验证失败: {e}")
             raise
+    
+    def split_content(self, content: str, chunk_size: int = 1000, overlap: int = 100) -> List[str]:
+        """将文本内容分割成块"""
+        if not content or not content.strip():
+            return []
+        
+        chunks = []
+        content = content.strip()
+        
+        # 如果内容长度小于chunk_size，直接返回
+        if len(content) <= chunk_size:
+            return [content]
+        
+        start = 0
+        while start < len(content):
+            end = start + chunk_size
+            
+            # 如果不是最后一块，尝试在句号、换行符或空格处分割
+            if end < len(content):
+                # 寻找最近的句号
+                last_period = content.rfind('。', start, end)
+                if last_period > start:
+                    end = last_period + 1
+                else:
+                    # 寻找最近的换行符
+                    last_newline = content.rfind('\n', start, end)
+                    if last_newline > start:
+                        end = last_newline + 1
+                    else:
+                        # 寻找最近的空格
+                        last_space = content.rfind(' ', start, end)
+                        if last_space > start:
+                            end = last_space + 1
+            
+            chunk = content[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+            
+            # 计算下一个开始位置，考虑重叠
+            start = max(start + 1, end - overlap)
+        
+        return chunks
