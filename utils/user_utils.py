@@ -2,7 +2,7 @@
 import logging
 from core.config import settings
 from core.database import db_manager
-from models.database import User
+from models.database import User, KbGroup
 
 logger = logging.getLogger(__name__)
 
@@ -84,3 +84,60 @@ def ensure_default_user():
     if create_default_user():
         return get_default_user()
     return None
+
+
+def create_default_kb_groups():
+    """为所有用户创建默认知识库分组
+    
+    轮询每个用户，检查是否有 kb_groups 数据，
+    如果没有，则创建一个名为"默认知识库"的分组。
+    
+    Returns:
+        bool: 创建成功返回True，失败返回False
+    """
+    session = db_manager.get_session()
+    
+    try:
+        # 获取所有用户
+        users = session.query(User).filter(User.is_active == True).all()
+        
+        for user in users:
+            # 检查用户是否已有知识库分组
+            existing_groups = session.query(KbGroup).filter(
+                KbGroup.user_id == user.id,
+                KbGroup.is_active == True
+            ).count()
+            
+            # 如果没有知识库分组，创建默认分组
+            if existing_groups == 0:
+                default_group = KbGroup(
+                    user_id=user.id,
+                    group_name="默认知识库",
+                    description="系统自动创建的默认知识库分组",
+                    is_active=True
+                )
+                
+                session.add(default_group)
+                logger.info(f"为用户 {user.username} (ID: {user.id}) 创建默认知识库分组")
+        
+        session.commit()
+        logger.info("默认知识库分组创建完成")
+        return True
+        
+    except Exception as e:
+        session.rollback()
+        logger.error(f"创建默认知识库分组失败: {e}")
+        return False
+    finally:
+        session.close()
+
+
+def ensure_default_kb_groups():
+    """确保所有用户都有默认知识库分组
+    
+    这是一个便捷函数，会为所有没有知识库分组的用户创建默认分组。
+    
+    Returns:
+        bool: 创建成功返回True，失败返回False
+    """
+    return create_default_kb_groups()

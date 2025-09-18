@@ -12,7 +12,8 @@ from core.config import settings
 from core.database import db_manager
 from api import chat, knowledge_base, system
 from models.schemas import BaseResponse
-from utils.user_utils import create_default_user
+from utils.user_utils import create_default_user, ensure_default_kb_groups
+from services.vector_service import VectorService
 
 # 配置日志
 logging.basicConfig(
@@ -53,6 +54,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"默认用户创建失败: {e}")
     
+    # 创建默认知识库分组
+    try:
+        ensure_default_kb_groups()
+        logger.info("默认知识库分组检查/创建完成")
+    except Exception as e:
+        logger.error(f"默认知识库分组创建失败: {e}")
+    
     # 创建上传目录
     try:
         import os
@@ -61,6 +69,17 @@ async def lifespan(app: FastAPI):
         logger.info(f"上传目录创建/检查完成: {upload_dir}")
     except Exception as e:
         logger.error(f"上传目录创建失败: {e}")
+
+    # 初始化 Milvus 集合
+    try:
+        vector_service = VectorService()
+        if await vector_service.connect():
+            await vector_service.create_collection(settings.MILVUS_COLLECTION_NAME)
+            logger.info(f"Milvus集合初始化完成: {settings.MILVUS_COLLECTION_NAME}")
+        else:
+            logger.warning("Milvus 未连接，向量相关功能不可用")
+    except Exception as e:
+        logger.error(f"Milvus 初始化失败: {e}")
     
     logger.info("SparkLink AI 应用启动完成")
     

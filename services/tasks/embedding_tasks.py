@@ -5,6 +5,7 @@ from typing import Dict, Any, List
 import os
 import json
 import asyncio
+import uuid
 import requests
 from urllib.parse import urlparse
 from datetime import datetime, timezone, timedelta
@@ -13,8 +14,8 @@ import logging
 from models.enums import DocType
 from core.config import settings
 from core.database import get_db
-from models.database import DocumentEmbeddingTask, TaskStatus
-from models.schemas import DocumentEmbeddingTaskRequest
+from models.database import KbDocument, TaskStatus
+from models.schemas import KbDocumentRequest
 from services.document_service import DocumentService
 from services.embedding_service import EmbeddingService
 from services.vector_service import VectorService
@@ -50,8 +51,8 @@ def update_task_status(doc_id: str, **kwargs):
     
     try:
         with get_db_session() as db:
-            task_record = db.query(DocumentEmbeddingTask).filter(
-                DocumentEmbeddingTask.doc_id == doc_id
+            task_record = db.query(KbDocument).filter(
+                KbDocument.doc_id == doc_id
             ).first()
             if task_record:
                 for key, value in kwargs.items():
@@ -74,8 +75,8 @@ def process_and_embed_document_task(self, request_data: dict) -> Dict[str, Any]:
     Returns:
         处理结果
     """
-    # 将字典转换为DocumentEmbeddingTaskRequest对象
-    request = DocumentEmbeddingTaskRequest(**request_data)
+    # 将字典转换为KbDocumentRequest对象
+    request = KbDocumentRequest(**request_data)
     try:
         logger.info(f"开始处理文档: {request.file_path}, 类型: {request.doc_type}")
         # 更新任务状态为处理中
@@ -84,7 +85,10 @@ def process_and_embed_document_task(self, request_data: dict) -> Dict[str, Any]:
             status=TaskStatus.PROCESSING,
             started_at=datetime.now(timezone(timedelta(hours=8)))
         )
-        if request.doc_type == DocType.POST:
+        # 统一初始化，避免在 POST 类型下未定义
+        is_url = False
+        temp_file_path = None
+        if request.doc_type == DocType.POST.value:
             # 帖子类型的文档，直接使用内容
             actual_file_path = None
             doc_content = request.doc_content
@@ -161,70 +165,72 @@ def process_and_embed_document_task(self, request_data: dict) -> Dict[str, Any]:
             logger.error(error_msg)
             return {"status": "error", "message": error_msg}
         # 4. 为每个分块生成嵌入向量并存储
-        collection_name = settings.vector_db_collection_name
+        collection_name = settings.MILVUS_COLLECTION_NAME
         processed_count = 0
         failed_count = 0
         logger.info(f"开始处理 {len(chunks)} 个分块，目标集合: {collection_name}")
-        # 批量处理优化
-        batch_size = 10  # 每批处理10个分块
-        for i in range(0, len(chunks), batch_size):
-            batch_chunks = chunks[i:i + batch_size]
-            batch_vectors = []  
-            # 批量生成嵌入向量
+        # 顺序处理每个分块（无需批处理，Celery 已并发）
+        all_vectors = []
+        for idx, chunk in enumerate(chunks):
             try:
-                batch_embeddings = embedding_service.generate_embeddings(batch_chunks)
-                for j, (chunk, embedding) in enumerate(zip(batch_chunks, batch_embeddings)):
-                    if embedding:
-                        vector_id = f"{os.path.basename(actual_file_path)}_{i+j}_{request.doc_id or 'default'}"
-                        
-                        vector_data = {
-                            "collection_name": collection_name,
-                            "vector_id": vector_id,
-                            "doc_id": request.doc_id or "default",
-                            "doc_name": os.path.basename(actual_file_path),
-                            "source_path": actual_file_path,
-                            "create_at": datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),
-                            "update_at": datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),
-                            "chunk_content": chunk,
-                            "vector": embedding,
-                            "doc_type": request.doc_type,
-                            "user_id": request.user_id,
-                            "group_id": request.group_id
-                        }
-                        batch_vectors.append(vector_data)
-                        processed_count += 1
-                        logger.debug(f"分块 {i+j+1} 向量生成成功")
-                    else:
-                        failed_count += 1
-                        logger.warning(f"分块 {i+j+1} 嵌入向量生成失败")
-                
-                # 批量插入向量
-                if batch_vectors:
-                    try:
-                        async def batch_insert_vectors():
-                            return await vector_service.batch_insert_vectors_async(batch_vectors)
-                        
-                        success = asyncio.run(batch_insert_vectors())
-                        if success:
-                            logger.debug(f"批次 {i//batch_size + 1} 向量插入成功，包含 {len(batch_vectors)} 个向量")
-                        else:
-                            failed_count += len(batch_vectors)
-                            processed_count -= len(batch_vectors)
-                            logger.warning(f"批次 {i//batch_size + 1} 向量插入失败")
-                    except Exception as insert_error:
-                        failed_count += len(batch_vectors)
-                        processed_count -= len(batch_vectors)
-                        logger.warning(f"批次 {i//batch_size + 1} 向量插入失败: {insert_error}")
-                # 更新进度
+                # 记录分块基本信息，避免日志过长仅打印长度
+                logger.debug(f"分块 {idx+1}/{len(chunks)} 文本长度={len(chunk)}")
+                # 使用同步嵌入接口，避免在 Celery 任务中嵌套事件循环
+                embedding = embedding_service.generate_embedding_sync(chunk)
+                if embedding:
+                    logger.debug(f"分块 {idx+1} 嵌入维度={len(embedding)}")
+                    base_name = request.doc_name or os.path.basename(actual_file_path)
+                    vector_id = uuid.uuid4().hex
+                    vector_data = {
+                        "collection_name": collection_name,
+                        "vector_id": vector_id,
+                        "doc_id": request.doc_id or "default",
+                        "doc_name": base_name,
+                        "source_path": actual_file_path or (request.file_path or f"post:{request.doc_id or 'unknown'}"),
+                        "create_at": datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),
+                        "update_at": datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),
+                        "chunk_content": chunk,
+                        "vector": embedding,
+                        "doc_type": request.doc_type,
+                        "user_id": request.user_id,
+                        "group_id": request.group_id
+                    }
+                    all_vectors.append(vector_data)
+                    processed_count += 1
+                    logger.debug(f"分块 {idx+1} 向量生成成功，vector_id={vector_id}")
+                else:
+                    failed_count += 1
+                    logger.warning(f"分块 {idx+1} 嵌入向量生成失败：返回为空")
+            except Exception as chunk_error:
+                failed_count += 1
+                # 打印堆栈，便于定位失败原因
+                logger.exception(f"分块 {idx+1} 处理异常：{chunk_error}")
+            finally:
+                # 10% -> 90% 线性进度
                 update_task_status(
                     request.doc_id,
                     processed_chunks=processed_count,
-                    progress=10.0 + (min(i + batch_size, len(chunks)) / len(chunks)) * 80.0
+                    progress=10.0 + ((idx + 1) / len(chunks)) * 80.0
                 )
-            except Exception as batch_error:
-                failed_count += len(batch_chunks)
-                logger.error(f"批次 {i//batch_size + 1} 处理失败: {batch_error}")
-        
+        # 一次性批量写入向量库，避免逐条插入触发重复删除同一 doc_id 导致数据丢失
+        if all_vectors:
+            try:
+                logger.info(f"准备批量插入向量：数量={len(all_vectors)}，集合={collection_name}，示例ID={all_vectors[0]['vector_id'] if all_vectors else 'N/A'}")
+                async def batch_insert_vectors():
+                    return await vector_service.batch_insert_vectors_async(all_vectors)
+                success = asyncio.run(batch_insert_vectors())
+                logger.info(f"批量插入向量完成，success={success}")
+                if not success:
+                    raise Exception("向量库批量插入失败")
+            except Exception as insert_error:
+                logger.error(f"批量插入向量失败: {insert_error}")
+                update_task_status(
+                    request.doc_id,
+                    status=TaskStatus.FAILED,
+                    error_message=str(insert_error),
+                    completed_at=datetime.now(timezone(timedelta(hours=8)))
+                )
+                return {"status": "error", "message": str(insert_error)}
         logger.info(f"分块处理完成 - 总数: {len(chunks)}, 成功: {processed_count}, 失败: {failed_count}")
         # 5. 完成任务
         result = {
@@ -259,10 +265,10 @@ def process_and_embed_document_task(self, request_data: dict) -> Dict[str, Any]:
         )
         return {"status": "error", "message": str(e)}
     finally:
-        # 清理临时文件
-        if actual_file_path and os.path.exists(actual_file_path):
+        # 清理仅当为 URL 下载到临时文件时
+        if 'temp_file_path' in locals() and temp_file_path and os.path.exists(temp_file_path):
             try:
-                os.unlink(actual_file_path)
-                logger.info(f"临时文件已清理: {actual_file_path}")
+                os.unlink(temp_file_path)
+                logger.info(f"临时文件已清理: {temp_file_path}")
             except Exception as e:
                 logger.warning(f"清理临时文件失败: {e}")

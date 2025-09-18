@@ -59,7 +59,7 @@ async def create_chat_session(
 
 @router.get("/sessions", response_model=BaseResponse)
 async def get_chat_sessions(
-    user_id: str,
+    user_id: str = settings.default_user_id,
     skip: int = 0,
     limit: int = 20,
     db: Session = Depends(get_db)

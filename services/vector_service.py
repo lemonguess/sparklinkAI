@@ -130,6 +130,7 @@ class VectorService:
                     dtype=DataType.VARCHAR,
                     max_length=50
                 ),
+                # auther_name 字段已移除
                 FieldSchema(
                     name="user_id",
                     dtype=DataType.VARCHAR,
@@ -137,7 +138,8 @@ class VectorService:
                 ),
                 FieldSchema(
                     name="group_id",
-                    dtype=DataType.INT64
+                    dtype=DataType.VARCHAR,
+                    max_length=50
                 ),
                 FieldSchema(
                     name="create_at",
@@ -149,8 +151,6 @@ class VectorService:
                     dtype=DataType.VARCHAR,
                     max_length=20
                 ),
-
-
             ]
             
             # 创建集合schema
@@ -202,18 +202,18 @@ class VectorService:
         chunk_content: str,
         vector: List[float],
         doc_type: str,
-        auther_name: str,
-        user_id: str = None
+        user_id: str = None,
+        group_id: str | None = None,
     ) -> bool:
         """插入向量"""
         # 如果没有提供user_id，使用默认值
         if user_id is None:
             user_id = settings.default_user_id
-            
+        
         return await self.insert_vector_async(
             collection_name, vector_id, doc_id, doc_name, source_path,
             create_at, update_at, chunk_content, vector, doc_type,
-            auther_name, user_id
+            user_id, group_id
         )
     
     async def insert_vector_async(
@@ -228,8 +228,8 @@ class VectorService:
         chunk_content: str,
         vector: List[float],
         doc_type: str,
-        auther_name: str,
-        user_id: str
+        user_id: str,
+        group_id: str | None = None,
     ) -> bool:
         """插入向量（异步）"""
         if not self._connected:
@@ -267,19 +267,22 @@ class VectorService:
                 except Exception as e:
                     logger.warning(f"删除相同doc_id数据时出错: {e}")
             
-            # 准备数据（按字段定义顺序）
+            # 规范化字段
+            group_id_val = str(group_id) if group_id is not None else ""
+            
+            # 准备数据（严格按schema字段顺序）
             data = [
-                [vector_id],  # id
-                [doc_id],  # doc_id
-                [doc_name[:500]],  # doc_name (截断)
-                [chunk_content[:4000]],  # chunk_content (截断)
-                [vector],  # vector
-                [source_path[:1000]],  # source_path (截断)
-                [auther_name[:200]],  # auther_name (截断)
-                [user_id],  # user_id
-                [doc_type[:50]],  # doc_type (截断)
-                [create_at],  # create_at
-                [update_at]  # update_at
+                [vector_id],                # id
+                [doc_id],                   # doc_id
+                [doc_name[:500]],           # doc_name
+                [chunk_content[:4000]],     # chunk_content
+                [vector],                   # vector
+                [source_path[:1000]],       # source_path
+                [doc_type[:50]],            # doc_type
+                [user_id],                  # user_id
+                [group_id_val],             # group_id
+                [create_at],                # create_at
+                [update_at],                # update_at
             ]
             
             # 插入数据
@@ -295,7 +298,92 @@ class VectorService:
         except Exception as e:
             logger.error(f"插入向量失败: {e}")
             return False
-    
+
+    async def batch_insert_vectors_async(self, batch_vectors: List[Dict[str, Any]]) -> bool:
+        """批量插入向量数据
+        参数:
+            batch_vectors: 由若干向量字典组成的列表，每个字典包含：
+                - collection_name, vector_id, doc_id, doc_name, source_path,
+                  create_at, update_at, chunk_content, vector, doc_type,
+                  user_id, group_id
+        返回:
+            bool: 是否插入成功
+        """
+        if not self._connected:
+            await self.connect()
+        if not MILVUS_AVAILABLE or not self._connected:
+            logger.error("Milvus未连接")
+            return False
+        if not batch_vectors:
+            return True
+        try:
+            # 假设同一批次属于同一集合；若出现多个集合名则按集合分组
+            grouped: Dict[str, List[Dict[str, Any]]] = {}
+            for item in batch_vectors:
+                cname = item.get("collection_name", self.default_collection)
+                grouped.setdefault(cname, []).append(item)
+            
+            for collection_name, items in grouped.items():
+                # 确保集合存在
+                if collection_name not in self._collections:
+                    if not utility.has_collection(collection_name):
+                        await self.create_collection(collection_name)
+                        if collection_name not in self._collections:
+                            return False
+                    else:
+                        collection = Collection(collection_name)
+                        self._collections[collection_name] = collection
+                collection = self._collections[collection_name]
+                
+                # 组装列数据（严格按schema顺序）
+                ids: List[str] = []
+                doc_ids: List[str] = []
+                doc_names: List[str] = []
+                chunk_contents: List[str] = []
+                vectors: List[List[float]] = []
+                source_paths: List[str] = []
+                doc_types: List[str] = []
+                user_ids: List[str] = []
+                group_ids: List[str] = []
+                create_ats: List[str] = []
+                update_ats: List[str] = []
+                
+                for it in items:
+                    ids.append(it.get("vector_id"))
+                    doc_ids.append(it.get("doc_id", ""))
+                    doc_names.append((it.get("doc_name") or "")[:500])
+                    chunk_contents.append((it.get("chunk_content") or "")[:4000])
+                    vectors.append(it.get("vector") or [])
+                    source_paths.append((it.get("source_path") or "")[:1000])
+                    doc_types.append((it.get("doc_type") or "")[:50])
+                    user_ids.append(it.get("user_id") or settings.default_user_id)
+                    gid = it.get("group_id")
+                    group_ids.append(str(gid) if gid is not None else "")
+                    create_ats.append(it.get("create_at") or "")
+                    update_ats.append(it.get("update_at") or "")
+                
+                data = [
+                    ids,
+                    doc_ids,
+                    doc_names,
+                    chunk_contents,
+                    vectors,
+                    source_paths,
+                    doc_types,
+                    user_ids,
+                    group_ids,
+                    create_ats,
+                    update_ats,
+                ]
+                
+                collection.insert(data)
+                collection.flush()
+                logger.debug(f"批量插入成功: 集合={collection_name}, 数量={len(items)}")
+            return True
+        except Exception as e:
+            logger.error(f"批量插入向量失败: {e}")
+            return False
+
     async def search_vectors(
         self,
         collection_name: str,
@@ -320,7 +408,7 @@ class VectorService:
         top_k: int = 10,
         similarity_threshold: float = 0.7,
         user_id: str = None,
-        group_id: int = None
+        group_id: str = None,
     ) -> List[Dict[str, Any]]:
         """搜索向量（异步）"""
         if not self._connected:
@@ -365,7 +453,7 @@ class VectorService:
                 param=search_params,
                 limit=top_k,
                 expr=filter_expr,  # 添加用户和分组过滤
-                output_fields=["doc_id", "doc_name", "source_path", "create_at", "update_at", "chunk_content", "doc_type", "auther_name", "user_id", "group_id"]
+                output_fields=["doc_id", "doc_name", "source_path", "create_at", "update_at", "chunk_content", "doc_type", "user_id", "group_id"]
             )
             
             # 处理结果
@@ -383,13 +471,12 @@ class VectorService:
                         "id": hit.id,
                         "score": score,
                         "doc_id": hit.entity.get("doc_id", ""),
-                        "title": hit.entity.get("doc_name", ""),  # 修正字段名
+                        "title": hit.entity.get("doc_name", ""),
                         "source_path": hit.entity.get("source_path", ""),
                         "create_at": hit.entity.get("create_at", ""),
                         "update_at": hit.entity.get("update_at", ""),
                         "content": hit.entity.get("chunk_content", ""),
                         "doc_type": hit.entity.get("doc_type", ""),
-                        "auther_name": hit.entity.get("auther_name", ""),
                         "user_id": hit.entity.get("user_id", ""),
                         "group_id": hit.entity.get("group_id", None)
                     }
@@ -406,7 +493,7 @@ class VectorService:
         except Exception as e:
             logger.error(f"向量搜索失败: {e}")
             return []
-    
+
     async def delete_vectors(
         self,
         collection_name: str,

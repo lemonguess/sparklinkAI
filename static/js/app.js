@@ -6,7 +6,11 @@ class SparkLinkApp {
         this.sessions = [];
         this.knowledgeBases = [];
         this.documents = [];
+        // 文档进度轮询
+        this.docPollingTimer = null;
+        this.docPollingInterval = 2000; // 2s 轮询
         this.messageCache = new Map(); // 缓存会话消息，避免重复加载
+
         this.settings = {
             maxTokens: 2000,
             temperature: 0.7,
@@ -57,44 +61,118 @@ class SparkLinkApp {
     }
     
     bindEvents() {
-        // 发送消息
-        document.getElementById('sendBtn').addEventListener('click', () => this.sendMessage());
-        document.getElementById('messageInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                this.sendMessage();
-            }
-        });
+        // 发送消息 - 这些元素在新界面中已移除，需要检查是否存在
+        const sendBtn = document.getElementById('sendBtn');
+        const messageInput = document.getElementById('messageInput');
+        const stopBtn = document.getElementById('stopBtn');
+        const newSessionBtn = document.getElementById('newSessionBtn');
+        const clearChatBtn = document.getElementById('clearChatBtn');
         
-        // 停止生成
-        document.getElementById('stopBtn').addEventListener('click', () => this.stopGeneration());
+        if (sendBtn) {
+            sendBtn.addEventListener('click', () => this.sendMessage());
+        }
         
-        // 自动调整输入框高度
-        document.getElementById('messageInput').addEventListener('input', (e) => {
-            e.target.style.height = 'auto';
-            e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
-        });
+        if (messageInput) {
+            messageInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.sendMessage();
+                }
+            });
+            
+            // 自动调整输入框高度
+            messageInput.addEventListener('input', (e) => {
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+            });
+        }
         
-        // 新建会话
-        document.getElementById('newSessionBtn').addEventListener('click', () => this.createNewSession());
+        if (stopBtn) {
+            stopBtn.addEventListener('click', () => this.stopGeneration());
+        }
         
-        // 清空聊天
-        document.getElementById('clearChatBtn').addEventListener('click', () => this.clearChat());
+        if (newSessionBtn) {
+            newSessionBtn.addEventListener('click', () => this.createNewSession());
+        }
+        
+        if (clearChatBtn) {
+            clearChatBtn.addEventListener('click', () => this.clearChat());
+        }
         
         // 上传文档
-        document.getElementById('uploadDocBtn').addEventListener('click', () => this.showUploadModal());
+        const uploadDocBtn = document.getElementById('uploadDocBtn');
+        if (uploadDocBtn) {
+            uploadDocBtn.addEventListener('click', () => this.showUploadModal());
+        }
+        
+        // 添加文本
+        const addTextBtn = document.getElementById('addTextBtn');
+        if (addTextBtn) {
+            addTextBtn.addEventListener('click', () => this.showAddTextModal());
+        }
         
         // 刷新文档
-        document.getElementById('refreshDocsBtn').addEventListener('click', () => this.loadDocuments());
+        const refreshDocsBtn = document.getElementById('refreshDocsBtn');
+        if (refreshDocsBtn) {
+            refreshDocsBtn.addEventListener('click', () => this.loadDocuments());
+        }
+        
+        // 知识召回检测
+        const recallBtn = document.getElementById('recallBtn');
+        if (recallBtn) {
+            recallBtn.addEventListener('click', () => this.performKnowledgeRecall());
+        }
+        
+        // 清空召回结果
+        const clearRecallBtn = document.getElementById('clearRecallBtn');
+        if (clearRecallBtn) {
+            clearRecallBtn.addEventListener('click', () => this.clearRecallResults());
+        }
+        
+        // 相似度滑块实时更新
+        const recallSimilarity = document.getElementById('recallSimilarity');
+        if (recallSimilarity) {
+            recallSimilarity.addEventListener('input', (e) => {
+                const valueElement = document.getElementById('recallSimilarityValue');
+                if (valueElement) {
+                    valueElement.textContent = recallSimilarity.value;
+                }
+            });
+            // 初始化滑块数值显示
+            const similarityValueEl = document.getElementById('recallSimilarityValue');
+            if (similarityValueEl) {
+                similarityValueEl.textContent = recallSimilarity.value;
+            }
+        }
+
+        // 回车直接触发知识召回（Shift+Enter 换行保留）
+        const recallQueryInput = document.getElementById('recallQuery');
+        if (recallQueryInput) {
+            recallQueryInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.performKnowledgeRecall();
+                }
+            });
+        }
         
         // 新建知识库
-        document.getElementById('newKnowledgeBaseBtn').addEventListener('click', () => this.showNewKnowledgeBaseModal());
+        const newKnowledgeBaseBtn = document.getElementById('newKnowledgeBaseBtn');
+        if (newKnowledgeBaseBtn) {
+            newKnowledgeBaseBtn.addEventListener('click', () => this.showNewKnowledgeBaseModal());
+        }
         
         // 知识库检索测试
-        document.getElementById('testKnowledgeBtn').addEventListener('click', () => this.showTestKnowledgeModal());
+        const testKnowledgeBtn = document.getElementById('testKnowledgeBtn');
+        if (testKnowledgeBtn) {
+            testKnowledgeBtn.addEventListener('click', () => this.showTestKnowledgeModal());
+        }
         
         // 设置
-        document.getElementById('settingsBtn').addEventListener('click', () => this.showSettingsModal());
+        const settingsBtn = document.getElementById('settingsBtn');
+        if (settingsBtn) {
+            settingsBtn.addEventListener('click', () => this.showSettingsModal());
+        }
         
         // 模态框事件
         this.bindModalEvents();
@@ -126,6 +204,13 @@ class SparkLinkApp {
         });
         
         document.getElementById('confirmUploadBtn').addEventListener('click', () => this.uploadFiles());
+        
+        // 文本上传模态框按钮
+        document.getElementById('cancelTextBtn').addEventListener('click', () => {
+            document.getElementById('addTextModal').style.display = 'none';
+        });
+        
+        document.getElementById('confirmTextBtn').addEventListener('click', () => this.uploadText());
         
         // 设置模态框按钮
         document.getElementById('saveSettingsBtn').addEventListener('click', () => this.saveSettings());
@@ -186,7 +271,7 @@ class SparkLinkApp {
     
     async loadSessions() {
         try {
-            const response = await fetch('/api/v1/chat/sessions?user_id=admin123456789abcdef0123456789ab');
+            const response = await fetch('/api/v1/chat/sessions');
             if (response.ok) {
                 const data = await response.json();
                 this.sessions = data.data || [];
@@ -203,11 +288,12 @@ class SparkLinkApp {
     
     async loadKnowledgeBases() {
         try {
-            const response = await fetch('/api/v1/kb/group/get_groups?user_id=test_user', {
+            const response = await fetch('/api/v1/kb/group/get_groups', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                }
+                },
+                body: JSON.stringify({})
             });
             if (response.ok) {
                 const data = await response.json();
@@ -290,17 +376,13 @@ class SparkLinkApp {
                 <div class="knowledge-item-header">
                     <div class="knowledge-item-title">${kb.group_name}</div>
                     <div class="knowledge-item-actions">
-                        <button class="btn-icon" onclick="app.editKnowledgeBase(${kb.id}, '${kb.group_name}')" title="编辑">
+                        <button class="btn-icon" onclick="app.editKnowledgeBase('${kb.id}', '${kb.group_name}')" title="编辑">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="btn-icon" onclick="app.deleteKnowledgeBase(${kb.id}, '${kb.group_name}')" title="删除">
+                        <button class="btn-icon" onclick="app.deleteKnowledgeBase('${kb.id}', '${kb.group_name}')" title="删除">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
-                </div>
-                <div class="knowledge-item-info">
-                    <span>文档: ${kb.doc_name || '未命名'}</span>
-                    <span class="knowledge-item-count">ID: ${kb.id}</span>
                 </div>
             </div>
         `).join('');
@@ -309,7 +391,7 @@ class SparkLinkApp {
         knowledgeList.querySelectorAll('.knowledge-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 if (!e.target.closest('.knowledge-item-actions')) {
-                    const kbId = parseInt(item.dataset.id);
+                    const kbId = item.dataset.id; // 保持为字符串，避免被转成数字
                     this.selectKnowledgeBase(kbId);
                 }
             });
@@ -325,12 +407,18 @@ class SparkLinkApp {
         
         // 更新文档面板标题
         const selectedKb = this.knowledgeBases.find(kb => kb.id === kbId);
-        const kbTitle = document.getElementById('selectedKbTitle');
+        const kbTitle = document.getElementById('selectedKbName');
         if (kbTitle && selectedKb) {
             kbTitle.textContent = selectedKb.group_name;
         }
         
-        // 显示文档面板
+        // 隐藏欢迎面板
+        const welcomePanel = document.getElementById('welcomePanel');
+        if (welcomePanel) {
+            welcomePanel.style.display = 'none';
+        }
+        
+        // 显示文档面板（包含知识召回检测区域）
         const documentPanel = document.getElementById('documentPanel');
         if (documentPanel) {
             documentPanel.style.display = 'block';
@@ -346,18 +434,73 @@ class SparkLinkApp {
             return;
         }
         
+        // 加载态与按钮禁用
+        const documentList = document.getElementById('documentList');
+        const refreshBtn = document.getElementById('refreshDocsBtn');
+        if (documentList) {
+            documentList.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> 正在加载文档...</div>';
+        }
+        if (refreshBtn) refreshBtn.disabled = true;
+        
         try {
-            const response = await fetch(`/api/knowledge_base/${this.currentKnowledgeBaseId}/documents`);
+            // 使用POST请求和JSON请求体
+            const response = await fetch('/api/v1/kb/group/detail', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    group_id: String(this.currentKnowledgeBaseId) // 确保为字符串
+                })
+            });
+            
             if (response.ok) {
-                this.documents = await response.json();
-                this.renderDocuments();
+                const result = await response.json();
+                if (result.success) {
+                    this.documents = result.data.documents || [];
+                    // 更新标题显示文档数量
+                    const kbTitle = document.getElementById('selectedKbName');
+                    const selectedKb = this.knowledgeBases.find(kb => kb.id === String(this.currentKnowledgeBaseId));
+                    if (kbTitle && selectedKb) {
+                        kbTitle.textContent = `${selectedKb.group_name}（${this.documents.length} 个文档）`;
+                    }
+                    this.renderDocuments();
+                    // 根据文档状态决定是否轮询
+                    const hasInProgress = this.documents.some(d => ['pending','processing'].includes(d.status));
+                    if (hasInProgress) {
+                        if (!this.docPollingTimer) {
+                            this.docPollingTimer = setInterval(() => {
+                                if (!this.currentKnowledgeBaseId) return;
+                                this.loadDocuments();
+                            }, this.docPollingInterval);
+                        }
+                    } else if (this.docPollingTimer) {
+                        clearInterval(this.docPollingTimer);
+                        this.docPollingTimer = null;
+                    }
+
+                } else {
+                    console.error('Failed to load documents:', result.message);
+                    this.showToast(result.message || '加载文档失败', 'error');
+                    if (documentList) {
+                        documentList.innerHTML = '<div class="empty-state">加载文档失败，请稍后重试</div>';
+                    }
+                }
             } else {
                 console.error('Failed to load documents');
                 this.showToast('加载文档失败', 'error');
+                if (documentList) {
+                    documentList.innerHTML = '<div class="empty-state">加载文档失败，请检查网络</div>';
+                }
             }
         } catch (error) {
             console.error('Error loading documents:', error);
             this.showToast('加载文档失败', 'error');
+            if (documentList) {
+                documentList.innerHTML = '<div class="empty-state">加载异常，请稍后重试</div>';
+            }
+        } finally {
+            if (refreshBtn) refreshBtn.disabled = false;
         }
     }
     
@@ -372,21 +515,39 @@ class SparkLinkApp {
         }
         
         documentList.innerHTML = this.documents.map(doc => `
-            <div class="document-item" data-id="${doc.id}">
+            <div class="document-item" data-id="${doc.task_id}">
                 <div class="document-info">
-                    <div class="document-name">${doc.name}</div>
+                    <div class="document-name">${doc.doc_name || '未命名文档'}</div>
                     <div class="document-meta">
-                        <span>大小: ${this.formatFileSize(doc.size || 0)}</span>
-                        <span>上传时间: ${this.formatTime(doc.created_at)}</span>
+                        <span>状态: ${this.getStatusText(doc.status)}</span>
+                        <span>类型: ${doc.doc_type || '未知'}</span>
+                        <span>进度: ${doc.progress || 0}%</span>
+                        <span>创建时间: ${this.formatTime(doc.created_at)}</span>
                     </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${(doc.progress || 0)}%"></div>
+                    </div>
+                    <div class="progress-text">${doc.progress || 0}%</div>
+                    ${doc.error_message ? `<div class="document-error">错误: ${doc.error_message}</div>` : ''}
                 </div>
-                <div class="document-actions">
-                    <button class="btn-icon" onclick="app.deleteDocument(${doc.id}, '${doc.name}')" title="删除">
+                <div class="document-card-actions">
+                    <button class="btn-icon" onclick="app.deleteDocument('${doc.doc_id}', '${doc.doc_name}')" title="删除">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
             </div>
         `).join('');
+    }
+    
+    // 获取状态文本
+    getStatusText(status) {
+        const statusMap = {
+            'pending': '待处理',
+            'processing': '处理中',
+            'completed': '已完成',
+            'failed': '失败'
+        };
+        return statusMap[status] || status;
     }
     
     // 格式化文件大小
@@ -405,13 +566,24 @@ class SparkLinkApp {
         }
         
         try {
-            const response = await fetch(`/api/documents/${docId}`, {
-                method: 'DELETE'
+            const response = await fetch(`/api/v1/kb/document/delete`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    doc_id: docId
+                })
             });
             
             if (response.ok) {
-                this.showToast('文档删除成功', 'success');
-                await this.loadDocuments(); // 重新加载文档列表
+                const result = await response.json();
+                if (result.success) {
+                    this.showToast('文档删除成功', 'success');
+                    await this.loadDocuments(); // 重新加载文档列表
+                } else {
+                    this.showToast(result.message || '文档删除失败', 'error');
+                }
             } else {
                 this.showToast('文档删除失败', 'error');
             }
@@ -1127,8 +1299,217 @@ class SparkLinkApp {
     
     showUploadModal() {
         document.getElementById('uploadModal').style.display = 'block';
+        // 打开时预选当前知识库
+        const kbSelect = document.getElementById('kbSelect');
+        if (kbSelect && this.currentKnowledgeBaseId) {
+            kbSelect.value = String(this.currentKnowledgeBaseId);
+        }
+        // 初始禁用上传按钮，直到选择文件
+        const confirmUploadBtn = document.getElementById('confirmUploadBtn');
+        if (confirmUploadBtn) confirmUploadBtn.disabled = true;
     }
     
+    showAddTextModal() {
+        // 清空表单
+        document.getElementById('textTitle').value = '';
+        document.getElementById('textContent').value = '';
+        
+        // 填充知识库选择器
+        const textKbSelect = document.getElementById('textKbSelect');
+        textKbSelect.innerHTML = '<option value="">请选择知识库</option>';
+        this.knowledgeBases.forEach(kb => {
+            const option = document.createElement('option');
+            option.value = kb.id;
+            option.textContent = kb.group_name;
+            if (String(kb.id) === String(this.currentKnowledgeBaseId)) {
+                option.selected = true;
+            }
+            textKbSelect.appendChild(option);
+        });
+        
+        document.getElementById('addTextModal').style.display = 'block';
+    }
+
+    async uploadText() {
+        const title = document.getElementById('textTitle').value.trim();
+        const content = document.getElementById('textContent').value.trim();
+        const kbId = document.getElementById('textKbSelect').value;
+        
+        if (!title) {
+            this.showToast('请输入标题', 'warning');
+            return;
+        }
+        
+        if (!content) {
+            this.showToast('请输入内容', 'warning');
+            return;
+        }
+        
+        if (!kbId) {
+            this.showToast('请选择知识库', 'warning');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/v1/kb/tasks/post_process', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    title: title,
+                    content: content,
+                    group_id: kbId
+                })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                    this.showToast('文本添加成功', 'success');
+                    document.getElementById('addTextModal').style.display = 'none';
+                    
+                    // 如果当前选中的知识库就是上传的知识库，刷新文档列表
+                    if (kbId === this.currentKnowledgeBaseId) {
+                        await this.loadDocuments();
+                    }
+                } else {
+                    this.showToast(result.message || '文本添加失败', 'error');
+                }
+            } else {
+                const error = await response.json();
+                this.showToast(error.detail || '文本添加失败', 'error');
+            }
+        } catch (error) {
+            console.error('Error uploading text:', error);
+            this.showToast('文本添加失败', 'error');
+        }
+    }
+
+    async performKnowledgeRecall() {
+        const query = document.getElementById('recallQuery').value.trim();
+        const topK = parseInt(document.getElementById('recallTopK').value);
+        const similarity = parseFloat(document.getElementById('recallSimilarity').value);
+        
+        if (!query) {
+            this.showToast('请输入查询内容', 'warning');
+            return;
+        }
+        
+        if (!this.currentKnowledgeBaseId) {
+            this.showToast('请先选择知识库', 'warning');
+            return;
+        }
+
+        // UI: 设置加载态与禁用相关控件
+        const recallBtnEl = document.getElementById('recallBtn');
+        const recallQueryEl = document.getElementById('recallQuery');
+        const recallTopKEl = document.getElementById('recallTopK');
+        const recallSimilarityEl = document.getElementById('recallSimilarity');
+        const recallResults = document.getElementById('recallResults');
+        const prevBtnHtml = recallBtnEl ? recallBtnEl.innerHTML : '';
+        if (recallBtnEl) {
+            recallBtnEl.disabled = true;
+            recallBtnEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 检索中';
+        }
+        if (recallQueryEl) recallQueryEl.disabled = true;
+        if (recallTopKEl) recallTopKEl.disabled = true;
+        if (recallSimilarityEl) recallSimilarityEl.disabled = true;
+        if (recallResults) {
+            recallResults.innerHTML = `
+                <div class="loading">
+                    <i class="fas fa-spinner fa-spin"></i> 正在检索，请稍候...
+                </div>
+            `;
+        }
+        
+        try {
+            const response = await fetch('/api/v1/kb/search', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    query: query,
+                    group_id: this.currentKnowledgeBaseId,
+                    top_k: topK,
+                    similarity_threshold: similarity
+                })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                    this.displayRecallResults(result.data);
+                } else {
+                    this.showToast(result.message || '检索失败', 'error');
+                }
+            } else {
+                const error = await response.json();
+                this.showToast(error.detail || '检索失败', 'error');
+            }
+        } catch (error) {
+            console.error('Error performing knowledge recall:', error);
+            this.showToast('检索失败', 'error');
+        } finally {
+            if (recallBtnEl) {
+                recallBtnEl.disabled = false;
+                recallBtnEl.innerHTML = prevBtnHtml || '检索';
+            }
+            if (recallQueryEl) recallQueryEl.disabled = false;
+            if (recallTopKEl) recallTopKEl.disabled = false;
+            if (recallSimilarityEl) recallSimilarityEl.disabled = false;
+        }
+    }
+
+    displayRecallResults(results) {
+        const recallResults = document.getElementById('recallResults');
+        
+        if (!results || results.length === 0) {
+            recallResults.innerHTML = `
+                <div class="welcome-message">
+                    <div class="welcome-icon">
+                        <i class="fas fa-search"></i>
+                    </div>
+                    <h3>未找到相关内容</h3>
+                    <p>请尝试调整查询内容或降低相似度阈值。</p>
+                </div>
+            `;
+            return;
+        }
+        
+        recallResults.innerHTML = results.map((result, index) => `
+            <div class="result-item">
+                <div class="result-header">
+                    <div class="result-title">${result.title || '未命名文档'}</div>
+                    <div class="result-score">${(result.score * 100).toFixed(1)}%</div>
+                </div>
+                <div class="result-content">${result.content}</div>
+                <div class="result-meta">
+                    <span><i class="fas fa-file"></i> ${result.doc_name || '未知文档'}</span>
+                    <span><i class="fas fa-clock"></i> ${this.formatTime(result.created_at)}</span>
+                    <span><i class="fas fa-tag"></i> 片段 ${index + 1}</span>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    clearRecallResults() {
+        const recallResults = document.getElementById('recallResults');
+        recallResults.innerHTML = `
+            <div class="welcome-message">
+                <div class="welcome-icon">
+                    <i class="fas fa-search"></i>
+                </div>
+                <h3>知识召回检测</h3>
+                <p>输入查询内容，检测知识库中相关的文档片段。</p>
+            </div>
+        `;
+        
+        // 清空查询输入框
+        document.getElementById('recallQuery').value = '';
+    }
+
     showNewKnowledgeBaseModal() {
         document.getElementById('newKnowledgeBaseModal').style.display = 'block';
         this.bindNewKnowledgeBaseEvents();
@@ -1150,7 +1531,7 @@ class SparkLinkApp {
         
         document.getElementById('settingsModal').style.display = 'block';
     }
-    
+
     handleFileSelection(files) {
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
@@ -1173,6 +1554,12 @@ class SparkLinkApp {
             files.forEach(file => dt.items.add(file));
             if (fileInput) {
                 fileInput.files = dt.files;
+            }
+
+            // 根据是否选择文件，控制上传按钮可用性
+            const confirmUploadBtn = document.getElementById('confirmUploadBtn');
+            if (confirmUploadBtn) {
+                confirmUploadBtn.disabled = !(fileInput && fileInput.files && fileInput.files.length > 0);
             }
         }
     }
@@ -1211,9 +1598,10 @@ class SparkLinkApp {
                 const file = fileArray[i];
                 const formData = new FormData();
                 formData.append('file', file);
-                formData.append('knowledge_base_id', this.currentKnowledgeBaseId);
+                // 传给后端的字段名与后端一致
+                formData.append('group_id', this.currentKnowledgeBaseId);
                 
-                const response = await fetch('/api/v1/kb/documents/upload', {
+                const response = await fetch('/api/v1/kb/tasks/file_process', {
                     method: 'POST',
                     body: formData
                 });
@@ -1222,6 +1610,27 @@ class SparkLinkApp {
                     const error = await response.json();
                     throw new Error(error.detail || `上传文件 ${file.name} 失败`);
                 }
+                // 读取返回的 task_id 并插入占位文档
+                const result = await response.json();
+                if (result && result.success && result.data && result.data.task_id) {
+                    const placeholder = {
+                        task_id: result.data.task_id,
+                        doc_name: file.name,
+                        status: 'pending',
+                        progress: 0,
+                        doc_type: (file.name.split('.').pop() || '').toUpperCase(),
+                        created_at: Date.now() / 1000
+                    };
+                    this.documents.unshift(placeholder);
+                    this.renderDocuments();
+                    // 确保开启轮询
+                    if (!this.docPollingTimer) {
+                        this.docPollingTimer = setInterval(() => {
+                            if (!this.currentKnowledgeBaseId) return;
+                            this.loadDocuments();
+                        }, this.docPollingInterval);
+                    }
+                }
                 
                 // 更新进度
                 const progress = ((i + 1) / fileArray.length) * 100;
@@ -1229,13 +1638,12 @@ class SparkLinkApp {
             }
             
             this.showToast('文件上传成功', 'success');
+            // 上传成功后刷新当前知识库文档
+            await this.loadDocuments();
             this.hideUploadModal();
-            await this.loadDocuments(); // 重新加载文档列表
-            await this.loadKnowledgeBases(); // 刷新知识库列表
-            
         } catch (error) {
-            console.error('上传失败:', error);
-            this.showToast(error.message || '上传失败', 'error');
+            console.error('Error uploading files:', error);
+            this.showToast(error.message || '文件上传失败', 'error');
         } finally {
             this.hideUploadProgress();
         }
@@ -1273,6 +1681,9 @@ class SparkLinkApp {
             <input type="file" id="fileInput" multiple accept=".pdf,.doc,.docx,.txt,.md,.ppt,.pptx">
         `;
         this.bindFileUploadEvents();
+        // 重置上传按钮为禁用，避免误点
+        const confirmUploadBtn = document.getElementById('confirmUploadBtn');
+        if (confirmUploadBtn) confirmUploadBtn.disabled = true;
     }
     
     bindNewKnowledgeBaseEvents() {
@@ -1384,7 +1795,6 @@ class SparkLinkApp {
                 body: JSON.stringify({
                     group_name: groupName,
                     description: description || '',
-                    user_id: 'test_user'
                 })
             });
             
@@ -1423,8 +1833,7 @@ class SparkLinkApp {
                 },
                 body: JSON.stringify({
                     query: query,
-                    user_id: 'test_user',
-                    group_id: groupId ? parseInt(groupId) : null,
+                    group_id: groupId || null,
                     top_k: topK,
                     similarity_threshold: similarity
                 })
@@ -1473,7 +1882,7 @@ class SparkLinkApp {
         if (!newName || newName === currentName) return;
         
         try {
-            const response = await fetch(`/api/v1/kb/group/update_group?user_id=test_user`, {
+            const response = await fetch(`/api/v1/kb/group/update_group`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1501,7 +1910,7 @@ class SparkLinkApp {
         if (!confirm(`确定要删除知识库"${name}"吗？此操作不可恢复。`)) return;
         
         try {
-            const response = await fetch(`/api/v1/kb/group/delete_group?user_id=test_user`, {
+            const response = await fetch(`/api/v1/kb/group/delete_group`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

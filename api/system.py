@@ -9,7 +9,7 @@ import logging
 from core.database import get_db, db_manager
 from core.config import settings
 from models.schemas import BaseResponse, SystemStatus, ModelConfig, KnowledgeBaseConfig, SearchConfig
-from models.database import ChatSession, DocumentEmbeddingTask
+from models.database import ChatSession, KbDocument
 from services.vector_service import VectorService
 
 router = APIRouter()
@@ -45,7 +45,7 @@ async def get_system_status(db: Session = Depends(get_db)):
             ChatSession.is_active == True
         ).count()
         
-        total_documents = 0  # db.query(Document).count()
+        total_documents = 0  # db.query(KbDocument).count()
         total_chunks = 0  # db.query(DocumentChunk).count()
         
         # 整体状态
@@ -195,15 +195,15 @@ async def get_system_stats(db: Session = Depends(get_db)):
             ChatSession.is_active == True
         ).count()
         
-        total_documents = 0  # db.query(Document).count()
-        processed_documents = 0  # db.query(Document).filter(Document.status == "completed").count()
+        total_documents = 0  # db.query(KbDocument).count()
+        processed_documents = 0  # db.query(KbDocument).filter(KbDocument.status == "completed").count()
         
         total_chunks = 0  # db.query(DocumentChunk).count()
         
         # 按状态统计文档
         doc_stats = {}
         for status in ["pending", "processing", "completed", "failed"]:
-            count = 0  # db.query(Document).filter(Document.status == status).count()
+            count = 0  # db.query(KbDocument).filter(KbDocument.status == status).count()
             doc_stats[status] = count
         
         stats = {

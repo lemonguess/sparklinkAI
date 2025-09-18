@@ -5,7 +5,8 @@ import uuid
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, ForeignKey, Enum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from .enums import DocType, TaskStatus
+import pytz
+from .enums import TaskStatus, DocType
 
 # 上海时区
 SHANGHAI_TZ = timezone(timedelta(hours=8))
@@ -29,8 +30,8 @@ class User(Base):
     
     # 关系
     sessions = relationship("ChatSession", back_populates="user")
-    embedding_tasks = relationship("DocumentEmbeddingTask", back_populates="user")
-    documents = relationship("Document", back_populates="user")
+    kb_groups = relationship("KbGroup", back_populates="user")
+    kb_documents = relationship("KbDocument", back_populates="user")
 
 class ChatSession(Base):
     """聊天会话模型"""
@@ -68,11 +69,11 @@ class ChatMessage(Base):
     # 关系
     session = relationship("ChatSession", back_populates="messages")
 
-class Document(Base):
+class KbGroup(Base):
     """知识库分组表"""
-    __tablename__ = "documents"
+    __tablename__ = "kb_groups"
     
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)  # 自增ID，作为group_id
+    id = Column(String(32), primary_key=True, index=True, default=lambda: uuid.uuid4().hex)  # UUID字符串主键
     user_id = Column(String(32), ForeignKey("users.id"), nullable=False)
     group_name = Column(String(255), nullable=False)  # 知识库分组名称
     description = Column(Text, nullable=True)  # 知识库分组描述
@@ -81,18 +82,18 @@ class Document(Base):
     is_active = Column(Boolean, default=True)
     
     # 关系
-    user = relationship("User", back_populates="documents")
-    embedding_tasks = relationship("DocumentEmbeddingTask", back_populates="document")
+    user = relationship("User", back_populates="kb_groups")
+    kb_documents = relationship("KbDocument", back_populates="kb_group")
 
-class DocumentEmbeddingTask(Base):
+class KbDocument(Base):
     """文档嵌入处理任务表"""
-    __tablename__ = "document_embedding_tasks"
-    task_id = Column(String(64), primary_key=True, index=True)  # Celery任务ID
+    __tablename__ = "kb_documents"
+    doc_id = Column(String(500), primary_key=True, index=True)  # 文档ID，用于唯一标识文档，作为主键
+    task_id = Column(String(64), nullable=True, index=True)  # Celery任务ID
     user_id = Column(String(32), ForeignKey("users.id"), nullable=False)
-    group_id = Column(Integer, ForeignKey("documents.id"), nullable=True)  # 文档所属组ID，关联Document表
+    group_id = Column(String(32), ForeignKey("kb_groups.id"), nullable=True)  # 文档所属组ID，关联KbGroup表
     doc_name = Column(String(255), nullable=False)  # 文档文件名
     doc_path = Column(String(500), nullable=True)  # 文档路径（可选）
-    doc_id = Column(String(500), nullable=True)  # 文档ID，用于唯一标识文档
     doc_content = Column(Text, nullable=True)  # 文档内容，仅限于doc_type==post的情况
     doc_type = Column(Enum(DocType), nullable=True)  # 文档类型,文件或帖子(files or posts)
     status = Column(Enum(TaskStatus), nullable=False, default=TaskStatus.PENDING)  # pending, processing, completed, failed
@@ -108,5 +109,5 @@ class DocumentEmbeddingTask(Base):
     completed_at = Column(DateTime, nullable=True)  # 完成时间
     
     # 关系
-    user = relationship("User", back_populates="embedding_tasks")
-    document = relationship("Document", back_populates="embedding_tasks")
+    user = relationship("User", back_populates="kb_documents")
+    kb_group = relationship("KbGroup", back_populates="kb_documents")

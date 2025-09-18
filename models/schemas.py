@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 import json
 from models.enums import DocType
-
+from core.config import settings
 # 自定义JSON编码器，统一时间格式
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -47,7 +47,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     session_name: Optional[str] = None  # 会话名称
     is_first: bool = False  # 是否为新会话
-    user_id: Optional[str] = None  # 用户ID，如果为空则使用默认用户ID
+    user_id: Optional[str] = settings.default_user_id  # 用户ID，如果为空则使用默认用户ID
     use_knowledge_base: bool = True
     use_web_search: bool = True
     stream: bool = True
@@ -67,7 +67,7 @@ class ChatMessage(BaseModel):
 class ChatSessionCreate(BaseModel):
     """创建聊天会话请求模型"""
     title: str = Field(..., min_length=1, max_length=200)
-    user_id: str  # 用户ID改为字符串类型
+    user_id: str = Field(settings.default_user_id, description="用户ID")
 
 class ChatSessionResponse(BaseModel):
     """聊天会话响应模型"""
@@ -110,11 +110,11 @@ class DocumentGroupCreate(BaseModel):
     """创建知识库分组请求模型"""
     group_name: str = Field(..., min_length=1, max_length=255, description="知识库分组名称")
     description: Optional[str] = Field(None, max_length=1000, description="知识库分组描述")
-    user_id: str = Field(..., description="用户ID")
+    user_id: str = Field(settings.default_user_id, description="用户ID")
 
 class DocumentGroupResponse(BaseModel):
     """知识库分组响应模型"""
-    id: int
+    id: str
     user_id: str
     group_name: str
     description: Optional[str]
@@ -133,14 +133,15 @@ class DocumentGroupUpdate(BaseModel):
     group_name: Optional[str] = Field(None, min_length=1, max_length=255, description="知识库分组名称")
     description: Optional[str] = Field(None, max_length=1000, description="知识库分组描述")
 
-class DocumentEmbeddingTaskRequest(BaseModel):
-    """文档嵌入任务请求模型"""
+class KbDocumentRequest(BaseModel):
+    """知识库文档请求模型"""
     file_path: str = Field(..., description="文件路径或URL")
     doc_type: DocType = Field(..., description="文档类型 (file 或 post)")
     doc_id: Optional[str] = Field(None, description="文档ID")
+    doc_name: Optional[str] = Field(None, description="文档名称")
     doc_content: str = Field("", description="文档内容")
-    user_id: str = Field(..., description="用户ID")
-    group_id: Optional[int] = Field(None, description="分组ID")
+    user_id: str = Field(settings.default_user_id, description="用户ID")
+    group_id: Optional[str] = Field(None, description="分组ID")
     
     class Config:
         from_attributes = True
@@ -150,20 +151,20 @@ class DocumentEmbeddingTaskRequest(BaseModel):
 class DocumentProcessRequest(BaseModel):
     """文档处理请求模型"""
     file_url: Optional[str] = None
-    user_id: Optional[str] = None
+    user_id: Optional[str] = settings.default_user_id
 
 class PostProcessRequest(BaseModel):
-    """POST类型文档处理请求模型"""
+    """POST类型文档处理请求模型（合并了原 TextUploadRequest 功能）"""
     content: str = Field(..., min_length=1, max_length=50000, description="文档内容")
     title: Optional[str] = Field(None, max_length=200, description="文档标题")
-    user_id: Optional[str] = Field(None, description="用户ID")
-    group_id: Optional[int] = Field(None, description="分组ID")
+    user_id: Optional[str] = Field(settings.default_user_id, description="用户ID")
+    group_id: Optional[str] = Field(None, description="分组ID")
     
 class DocumentQueryRequest(BaseModel):
     """文档查询请求模型"""
     query: str = Field(..., min_length=1, max_length=1000)
-    user_id: Optional[str] = None
-    group_id: Optional[int] = Field(None, description="分组ID，用于指定查询的知识库")
+    user_id: Optional[str] = settings.default_user_id
+    group_id: Optional[str] = Field(None, description="分组ID，用于指定查询的知识库")
     top_k: int = Field(10, ge=1, le=100)
     similarity_threshold: float = Field(0.7, ge=0.0, le=1.0)
     collection_name: Optional[str] = None
@@ -181,7 +182,7 @@ class DocumentUpload(BaseModel):
     """文档上传请求模型"""
     filename: str
     file_type: str
-    user_id: str
+    user_id: str = settings.default_user_id
 
 class DocumentResponse(BaseModel):
     """文档响应模型"""
@@ -239,6 +240,38 @@ class KnowledgeBaseResponse(BaseModel):
             datetime: lambda v: v.strftime('%Y-%m-%d %H:%M:%S')
         }
 
+# 获取知识库分组列表请求模型
+class DocumentGroupListRequest(BaseModel):
+    """获取知识库分组列表请求模型"""
+    user_id: Optional[str] = Field(settings.default_user_id, description="用户ID，如果为空则使用默认用户ID")
+
+# 更新知识库分组请求模型
+class DocumentGroupUpdateRequest(BaseModel):
+    """更新知识库分组请求模型"""
+    group_id: str = Field(..., description="分组ID")
+    group_name: Optional[str] = Field(None, description="分组名称")
+    description: Optional[str] = Field(None, description="分组描述")
+    user_id: Optional[str] = Field(settings.default_user_id, description="用户ID，如果为空则使用默认用户ID")
+
+# 知识库分组详情请求模型
+class GroupDetailRequest(BaseModel):
+    """获取知识库分组详情请求模型"""
+    group_id: str = Field(..., description="分组ID")
+    user_id: Optional[str] = Field(settings.default_user_id, description="用户ID，如果为空则使用默认用户ID")
+
+# 删除知识库分组请求模型
+class DocumentGroupDeleteRequest(BaseModel):
+    """删除知识库分组请求模型"""
+    group_id: str = Field(..., description="分组ID")
+    user_id: Optional[str] = Field(settings.default_user_id, description="用户ID，如果为空则使用默认用户ID")
+
+# 删除文档请求模型
+class DocumentDeleteRequest(BaseModel):
+    """删除文档请求模型"""
+    doc_id: str = Field(..., description="文档ID")
+    user_id: Optional[str] = Field(settings.default_user_id, description="用户ID，如果为空则使用默认用户ID")
+
+# 文本上传请求模型
 # 搜索相关模型
 class SearchRequest(BaseModel):
     """搜索请求模型"""

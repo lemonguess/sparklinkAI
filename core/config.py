@@ -160,7 +160,7 @@ class Settings:
     @property
     def default_user_id(self) -> str:
         """获取默认用户ID"""
-        return self.config.get('default_user', 'id', fallback='admin123456789abcdef0123456789abcdef')
+        return self.config.get('default_user', 'id', fallback='admin123456789abcdef0123456789ab')
     
     @property
     def upload_dir(self) -> str:
