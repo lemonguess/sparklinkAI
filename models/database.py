@@ -65,6 +65,7 @@ class ChatMessage(Base):
     use_web_search = Column(Boolean, default=False)
     knowledge_sources = Column(Text)  # JSON格式存储知识库来源
     web_search_results = Column(Text)  # JSON格式存储搜索结果
+    thinking_process = Column(Text)  # 思考过程内容
     
     # 关系
     session = relationship("ChatSession", back_populates="messages")

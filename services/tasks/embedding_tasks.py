@@ -88,14 +88,13 @@ def process_and_embed_document_task(self, request_data: dict) -> Dict[str, Any]:
         # 统一初始化，避免在 POST 类型下未定义
         is_url = False
         temp_file_path = None
+        actual_file_path = request.file_path
         if request.doc_type == DocType.POST.value:
             # 帖子类型的文档，直接使用内容
-            actual_file_path = None
             doc_content = request.doc_content
         else:
             # 判断是URL还是本地文件路径
             is_url = False
-            actual_file_path = request.file_path
             temp_file_path = None
             parsed_url = urlparse(request.file_path)
             if parsed_url.scheme in ('http', 'https'):
@@ -186,7 +185,7 @@ def process_and_embed_document_task(self, request_data: dict) -> Dict[str, Any]:
                         "vector_id": vector_id,
                         "doc_id": request.doc_id or "default",
                         "doc_name": base_name,
-                        "source_path": actual_file_path or (request.file_path or f"post:{request.doc_id or 'unknown'}"),
+                        "source_path": actual_file_path or (request.file_path or 'unknown'),
                         "create_at": datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),
                         "update_at": datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),
                         "chunk_content": chunk,

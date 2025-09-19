@@ -271,10 +271,10 @@ async def get_group_documents(
         
         # 获取该分组下的所有文档任务（排除已删除的）
         documents = db.query(KbDocument).filter(
-            KbGroup.id == request.group_id,
-            KbGroup.user_id == user_id,
-            KbGroup.is_active == True  # 排除已删除的文档
-        ).order_by(KbGroup.created_at.desc()).all()
+            KbDocument.group_id == request.group_id,
+            KbDocument.user_id == user_id,
+            KbDocument.is_active == True  # 排除已删除的文档
+        ).order_by(KbDocument.created_at.desc()).all()
         
         documents_data = []
         for doc in documents:
@@ -480,7 +480,7 @@ async def process_post_content(
             user_id=request.user_id,
             group_id=request.group_id,  # 修复：写入分组ID
             doc_name=doc_title,
-            doc_path="",  # POST类型不需要文件路径
+            doc_path=request.source_url,
             doc_type=DocType.POST,
             status=TaskStatus.PENDING,
             progress=0,
@@ -494,9 +494,10 @@ async def process_post_content(
         
         # 提交Celery任务处理嵌入
         task_request = KbDocumentRequest(
-            file_path="",  # POST类型不需要文件路径
+            file_path=request.source_url,
             doc_type=DocType.POST,
             doc_id=doc_id,
+            doc_name=doc_title,
             doc_content=request.content,
             user_id=request.user_id,
             group_id=request.group_id
@@ -506,7 +507,7 @@ async def process_post_content(
         
         # 根据 doc_id 更新真实 task_id（避免并发下空字符串主键冲突）
         db.query(KbDocument).filter(
-            KbGroup.doc_id == doc_id,
+            KbGroup.id == doc_id,
             KbGroup.user_id == request.user_id
         ).update({"task_id": task_id}, synchronize_session=False)
         db.commit()
@@ -668,11 +669,13 @@ async def search_knowledge_base(
 ):
     """搜索知识库"""
     try:
-        results = await search_service.search(
+        results = await search_service.knowledge_search(
             query=request.query,
             top_k=request.top_k,
             similarity_threshold=request.similarity_threshold,
-            collection_name=request.collection_name
+            collection_name=request.collection_name,
+            group_id=request.group_id,
+            user_id=request.user_id
         )
         return BaseResponse(
             success=True,

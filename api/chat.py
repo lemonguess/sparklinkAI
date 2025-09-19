@@ -209,7 +209,8 @@ async def get_chat_messages(
                 sources={
                     'knowledge_sources': json.loads(msg.knowledge_sources) if msg.knowledge_sources else [],
                     'web_search_results': json.loads(msg.web_search_results) if msg.web_search_results else []
-                } if (msg.knowledge_sources or msg.web_search_results) else None
+                } if (msg.knowledge_sources or msg.web_search_results) else None,
+                thinking_process=msg.thinking_process
             ))
         
         return BaseResponse(
@@ -234,71 +235,45 @@ async def chat_stream(
         try:
             # 发送请求ID
             yield f"data: {json.dumps({'type': 'request_id', 'request_id': request_id}, ensure_ascii=False)}\n\n"
-
+            # 发送start事件，让前端创建消息元素
+            yield f"data: {json.dumps({'type': 'start'}, ensure_ascii=False)}\n\n"
             start_time = time.time()
-            
             # 初始化ChatService
             chat_service = ChatService(db=db)
-            
             # 检查session_id是否提供
             if not request.session_id:
                 yield f"data: {json.dumps({'error': '请先创建会话'}, ensure_ascii=False)}\n\n"
                 return
-            
             # 处理新会话创建
-            first_chat = False
-            if getattr(request, 'is_first', False) or getattr(request, 'newsession', False):
-                # 创建新会话，使用前端传入的session_id
-                user_id = request.user_id if request.user_id else settings.default_user_id
-                session_title = request.session_name if request.session_name else '新对话'
-                
+            if request.is_first:
+                user_id = request.user_id or settings.default_user_id
                 new_session = ChatSession(
                     id=request.session_id,  # 使用前端传入的UUID
                     user_id=user_id,
-                    title=session_title
+                    title="新会话"  # 使用临时标题
                 )
                 db.add(new_session)
                 db.commit()
                 db.refresh(new_session)
                 session_id = new_session.id
                 session = new_session
-                first_chat = True
                 
-                # 发送会话信息给前端
-                yield f"data: {json.dumps({'type': 'session_info', 'session_id': session_id, 'session_name': session_title}, ensure_ascii=False)}\n\n"
+                # 发送会话信息给前端（使用临时标题）
+                yield f"data: {json.dumps({'type': 'session_info', 'session_id': session_id, 'session_name': '新会话'}, ensure_ascii=False)}\n\n"
             else:
                 session_id = request.session_id
                 session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
                 if not session:
                     yield f"data: {json.dumps({'error': '会话不存在'}, ensure_ascii=False)}\n\n"
                     return
-            
-
-            # 发送开始信号
-            yield f"data: {json.dumps({'type': 'start', 'session_id': session_id}, ensure_ascii=False)}\n\n"
-            
-            # 如果是第一次对话，立即生成并发送标题
-            if first_chat:
-                try:
-                    # 基于用户输入快速生成标题
-                    new_title = await chat_service.generate_session_title_from_input(request.message)
-                    session.title = new_title
-                    db.commit()
-                    
-                    # 通过 SSE 发送标题更新事件
-                    yield f"data: {json.dumps({'type': 'title', 'title': new_title, 'session_id': session_id}, ensure_ascii=False)}\n\n"
-                    logger.info(f"🏷️ 即时生成会话标题: {new_title}")
-                except Exception as e:
-                    logger.error(f"即时生成标题失败: {e}")
-            
             # 使用intelligent_chat进行流式生成
             full_response = ""
+            thinking_process = ""
             was_cancelled = False
-            
             try:
                 search_result = await chat_service.intelligent_search(
                     query=request.message,
-                    strategy=SearchStrategy.AUTO,
+                    strategy=SearchStrategy(request.search_strategy),
                 )
                 yield f"data: {json.dumps({'type': 'source', 'content': search_result}, ensure_ascii=False)}\n\n"
                 async for _type, chunk in chat_service.generate_stream_response(
@@ -308,9 +283,12 @@ async def chat_stream(
                     request_id=request_id,
                     session_id=session_id,
                 ):
-                    full_response += chunk
-                    yield f"data: {json.dumps({'type': _type, 'content': chunk}, ensure_ascii=False)}\n\n"
+                    if _type == 'content':
+                        full_response += chunk
+                    elif _type == 'think':
+                        thinking_process += chunk
                     
+                    yield f"data: {json.dumps({'type': _type, 'content': chunk}, ensure_ascii=False)}\n\n"
                     # 检查是否被取消
                     if request_id in active_streams and active_streams[request_id].get('cancelled', False):
                         was_cancelled = True
@@ -336,9 +314,39 @@ async def chat_stream(
                     await chat_service.save_conversation_history(
                         session_id=session_id,
                         user_message=request.message,
-                        assistant_message=full_response
+                        assistant_message=full_response,
+                        knowledge_sources=search_result['knowledge_results'],
+                        web_search_results=search_result['web_results'],
+                        thinking_process=thinking_process if thinking_process.strip() else None
                     )
-                    logger.info(f"💾 已保存完整的对话记录，内容长度: {len(full_response)}")
+                    logger.info(f"💾 已保存完整的对话记录，内容长度: {len(full_response)}, 思考过程长度: {len(thinking_process)}")
+                    
+                    # 如果是新会话，异步生成并推送标题
+                    if request.is_first:
+                        try:
+                            session_title = await chat_service.generate_session_title_from_input(request.message)
+                            
+                            # 更新数据库中的会话标题
+                            db.query(ChatSession).filter(ChatSession.id == session_id).update(
+                                {"title": session_title}, synchronize_session=False
+                            )
+                            db.commit()
+                            
+                            # 推送标题更新给前端
+                            yield f"data: {json.dumps({'type': 'title_update', 'session_id': session_id, 'title': session_title}, ensure_ascii=False)}\n\n"
+                            
+                            logger.info(f"会话标题已生成并推送: {session_id} -> {session_title}")
+                            
+                        except Exception as e:
+                            logger.error(f"异步生成标题失败: {e}")
+                            # 如果生成失败，使用用户消息的前几个字符作为标题
+                            fallback_title = request.message[:10] + "..." if len(request.message) > 10 else request.message
+                            db.query(ChatSession).filter(ChatSession.id == session_id).update(
+                                {"title": fallback_title}, synchronize_session=False
+                            )
+                            db.commit()
+                            yield f"data: {json.dumps({'type': 'title_update', 'session_id': session_id, 'title': fallback_title}, ensure_ascii=False)}\n\n"
+                    
                 except Exception as e:
                     logger.error(f"保存对话历史失败: {e}")
             

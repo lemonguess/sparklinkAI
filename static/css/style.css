@@ -93,6 +93,18 @@ body {
     gap: 10px;
 }
 
+/* 品牌标题样式 - 可点击 */
+.brand-title {
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.brand-title:hover {
+    color: #3498db;
+    transform: scale(1.02);
+}
+
 .sidebar-header i {
     color: #3498db;
 }
@@ -108,6 +120,41 @@ body {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 15px;
+}
+
+.section-header.collapsible {
+    cursor: pointer;
+    user-select: none;
+}
+
+.section-header .header-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+}
+
+.section-header .collapse-icon {
+    transition: transform 0.3s ease;
+    font-size: 0.8rem;
+    color: #95a5a6;
+}
+
+.section-header.collapsed .collapse-icon {
+    transform: rotate(-90deg);
+}
+
+.collapsible-content {
+    transition: all 0.3s ease;
+    overflow: hidden;
+}
+
+.collapsible-content.collapsed {
+    max-height: 0 !important;
+    opacity: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
 }
 
 .section-header h3 {
@@ -217,6 +264,87 @@ body {
     height: auto; /* 覆盖 .document-panel 中的 100vh，避免撑满并造成右侧空白 */
     border-right: none; /* 覆盖 .document-panel 的右边框 */
     box-sizing: border-box;
+}
+
+/* 知识召回检测面板 */
+.knowledge-test-panel {
+    display: none; /* 默认隐藏，通过JavaScript控制显示 */
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+    overflow: hidden;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    max-height: calc(100vh - 180px);
+    display: flex;
+    flex-direction: column;
+}
+
+.knowledge-test-panel .panel-header {
+    background: #f8f9fa;
+    padding: 16px 20px;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.test-controls {
+    padding: 20px;
+    flex-shrink: 0;
+}
+
+.test-controls .input-group {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    align-items: center;
+}
+
+.test-controls .form-control {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.test-params {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+}
+
+.param-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.param-group label {
+    font-size: 14px;
+    color: #555;
+    white-space: nowrap;
+}
+
+.param-group input[type="number"] {
+    width: 80px;
+    padding: 6px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.param-group input[type="range"] {
+    width: 120px;
+}
+
+.similarity-value {
+    font-size: 14px;
+    color: #666;
+    font-weight: 500;
+    min-width: 40px;
 }
 
 .document-panel-header {
@@ -414,6 +542,16 @@ body {
     display: flex;
     flex-direction: column;
     background: #fafafa;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* 聊天容器 */
+.chat-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
 }
 
 .chat-header {
@@ -423,6 +561,7 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-shrink: 0; /* 防止头部被压缩 */
 }
 
 .chat-title h2 {
@@ -486,12 +625,22 @@ body {
     box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
 }
 
-/* 聊天消息区 */
+/* 聊天消息区 - 修复滚动问题 */
 .chat-messages {
     flex: 1;
     padding: 20px;
     overflow-y: auto;
     background: #fafafa;
+    min-height: 0; /* 允许flex子项收缩 */
+    max-height: calc(100vh - 200px); /* 确保不超出视口 */
+}
+
+/* 聊天输入区域 - 固定在底部 */
+.chat-input-container {
+    flex-shrink: 0; /* 防止输入区域被压缩 */
+    background: #fff;
+    border-top: 1px solid #e0e0e0;
+    padding: 15px 20px;
 }
 
 .welcome-message {
@@ -527,23 +676,64 @@ body {
 
 .quick-btn {
     background: #fff;
-    border: 2px solid #3498db;
-    color: #3498db;
+    border: 2px solid #e0e0e0;
+    color: #7f8c8d;
     padding: 12px 20px;
     border-radius: 25px;
     cursor: pointer;
     transition: all 0.2s ease;
-    font-weight: 500;
+    font-size: 0.9rem;
     display: flex;
     align-items: center;
     gap: 8px;
 }
 
 .quick-btn:hover {
-    background: #3498db;
-    color: white;
+    border-color: #3498db;
+    color: #3498db;
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(52, 152, 219, 0.3);
+    box-shadow: 0 4px 12px rgba(52, 152, 219, 0.2);
+}
+
+.quick-btn i {
+    font-size: 1rem;
+}
+
+/* 搜索策略按钮 */
+.search-strategy {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    justify-content: center;
+}
+
+.strategy-btn {
+    background: #ecf0f1;
+    border: none;
+    color: #7f8c8d;
+    padding: 8px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+}
+
+.strategy-btn:hover {
+    background: #d5dbdb;
+    color: #2c3e50;
+}
+
+.strategy-btn.active {
+    background: linear-gradient(135deg, #3498db, #2980b9);
+    color: white;
+}
+
+.strategy-btn i {
+    font-size: 0.8rem;
 }
 
 .message {
@@ -635,11 +825,11 @@ body {
 
 .input-wrapper {
     display: flex;
-    align-items: flex-end;
-    gap: 12px;
+    align-items: center;
+    gap: 8px;
     background: #f8f9fa;
     border-radius: 25px;
-    padding: 12px 20px;
+    padding: 8px 12px;
     border: 2px solid transparent;
     transition: all 0.2s ease;
 }
@@ -647,6 +837,44 @@ body {
 .input-wrapper:focus-within {
     border-color: #3498db;
     box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+/* 左侧控制按钮 */
+.input-left-controls {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.input-left-controls .strategy-btn {
+    background: #ecf0f1;
+    border: none;
+    color: #7f8c8d;
+    padding: 8px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    font-weight: 500;
+}
+
+.input-left-controls .strategy-btn:hover {
+    background: #d5dbdb;
+    color: #2c3e50;
+}
+
+.input-left-controls .strategy-btn.active {
+    background: linear-gradient(135deg, #3498db, #2980b9);
+    color: white;
+}
+
+.input-left-controls .strategy-btn i {
+    font-size: 0.8rem;
 }
 
 #messageInput {
@@ -659,10 +887,18 @@ body {
     line-height: 1.5;
     max-height: 120px;
     font-family: inherit;
+    min-height: 20px;
 }
 
 #messageInput::placeholder {
     color: #95a5a6;
+}
+
+/* 右侧控制按钮 */
+.input-right-controls {
+    display: flex;
+    gap: 4px;
+    align-items: center;
 }
 
 .input-actions {
@@ -872,11 +1108,14 @@ body {
     margin-top: 20px;
     border-top: 1px solid #e0e0e0;
     padding-top: 20px;
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
 }
 
 .results-list {
-    max-height: 300px;
-    overflow-y: auto;
+    max-height: none;
+    overflow-y: visible;
     border: 1px solid #e0e0e0;
     border-radius: 6px;
     background: #f8f9fa;
@@ -1621,6 +1860,95 @@ body {
     border-bottom-color: rgba(255, 255, 255, 0.9);
 }
 
+/* 折叠功能样式 */
+.collapsible {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    margin: 8px 0;
+    overflow: hidden;
+}
+
+.source-header, .subsection-header {
+    background: #f8f9fa;
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+    transition: background-color 0.2s ease;
+}
+
+.source-header:hover, .subsection-header:hover {
+    background: #e9ecef;
+}
+
+.source-header h4 {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.subsection-header strong {
+    font-size: 0.85rem;
+}
+
+.toggle-icon {
+    font-size: 0.8rem;
+    transition: transform 0.2s ease;
+}
+
+.collapsible.expanded .toggle-icon {
+    transform: rotate(180deg);
+}
+
+.source-content, .subsection-content {
+    display: none;
+    padding: 12px;
+    background: #fff;
+}
+
+.collapsible.expanded .source-content,
+.collapsible.expanded .subsection-content {
+    display: block;
+}
+
+.subsection-header {
+    background: #f0f8f0;
+    border-bottom: 1px solid #e0e0e0;
+    margin: 0;
+}
+
+.subsection-header:hover {
+    background: #e8f5e8;
+}
+
+.knowledge-results .subsection-content,
+.web-results .subsection-content {
+    padding: 8px 12px;
+}
+
+.knowledge-results ul,
+.web-results ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.knowledge-results li,
+.web-results li {
+    margin: 4px 0;
+    font-size: 0.85rem;
+}
+
+.web-results a {
+    color: #2563eb;
+    text-decoration: none;
+}
+
+.web-results a:hover {
+    text-decoration: underline;
+}
+
 /* 表格样式 */
 .message-content table {
     width: 100%;
@@ -1649,6 +1977,298 @@ body {
 
 .message.user .message-content td {
     border-bottom-color: rgba(255, 255, 255, 0.3);
+}
+
+/* 思考过程样式 - 统一样式 */
+.thinking-container {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    margin: 10px 0;
+    overflow: hidden;
+}
+
+.thinking-header {
+    background: #e3f2fd;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.thinking-header i {
+    color: #1976d2;
+    font-size: 14px;
+}
+
+.thinking-header span {
+    color: #1976d2;
+    font-weight: 500;
+    font-size: 14px;
+    flex: 1;
+}
+
+.thinking-toggle {
+    background: none;
+    border: none;
+    color: #1976d2;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+}
+
+.thinking-toggle:hover {
+    background: rgba(25, 118, 210, 0.1);
+}
+
+.thinking-toggle i {
+    font-size: 12px;
+    transition: transform 0.2s ease;
+}
+
+.thinking-content {
+    padding: 12px;
+    background: #fafafa;
+    color: #495057;
+    font-size: 14px;
+    line-height: 1.5;
+    border-top: 1px solid #e9ecef;
+}
+
+/* 实时思考过程样式 - 与历史记录保持一致 */
+.message-think {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    margin: 10px 0;
+    overflow: hidden;
+}
+
+.message-think.thinking-content {
+    padding: 12px;
+    background: #fafafa;
+    color: #495057;
+    font-size: 14px;
+    line-height: 1.5;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+}
+
+.message-think.thinking-content::before {
+    content: "💭 思考过程: ";
+    font-weight: 600;
+    color: #1976d2;
+    font-style: normal;
+    display: block;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+/* 来源信息样式 */
+.source-info {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 15px 0;
+    font-size: 14px;
+}
+
+.source-info h4 {
+    margin: 0 0 10px 0;
+    color: #495057;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.decision-reasoning {
+    margin-bottom: 15px;
+    padding: 8px 12px;
+    background: #e3f2fd;
+    border-radius: 6px;
+    color: #1565c0;
+}
+
+.knowledge-results, .web-results {
+    margin-bottom: 15px;
+}
+
+.knowledge-results strong, .web-results strong {
+    color: #495057;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.knowledge-results ul, .web-results ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.knowledge-results li, .web-results li {
+    margin-bottom: 5px;
+    line-height: 1.4;
+}
+
+.web-results a {
+    color: #007bff;
+    text-decoration: none;
+}
+
+.web-results a:hover {
+    text-decoration: underline;
+}
+
+/* 搜索策略按钮样式 */
+.search-strategy {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.strategy-btn {
+    padding: 6px 12px;
+    border: 1px solid #ddd;
+    background: #f8f9fa;
+    color: #495057;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.strategy-btn:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+    transform: translateY(-1px);
+}
+
+.strategy-btn.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: #667eea;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.strategy-btn.active:hover {
+    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.strategy-btn i {
+    font-size: 0.8rem;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .search-strategy {
+        justify-content: center;
+    }
+    
+    .strategy-btn {
+        flex: 1;
+        min-width: 80px;
+        justify-content: center;
+    }
+}
+
+/* 聊天选项样式 */
+.chat-options {
+    display: flex;
+    gap: 20px;
+    padding: 10px 15px;
+    background: var(--bg-secondary);
+    border-radius: 8px 8px 0 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.option-group {
+    display: flex;
+    align-items: center;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text-secondary);
+    user-select: none;
+}
+
+.checkbox-label input[type="checkbox"] {
+    display: none;
+}
+
+.checkmark {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border-color);
+    border-radius: 4px;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.checkbox-label input[type="checkbox"]:checked + .checkmark {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.checkbox-label input[type="checkbox"]:checked + .checkmark::after {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 2px;
+    width: 4px;
+    height: 8px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.checkbox-label:hover .checkmark {
+    border-color: var(--primary-color);
+}
+
+.checkbox-label i {
+    font-size: 14px;
+}
+
+/* 停止按钮样式 */
+.btn-stop {
+    background: var(--danger-color);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-left: 8px;
+}
+
+.btn-stop:hover {
+    background: #c82333;
+    transform: scale(1.05);
+}
+
+.btn-stop:active {
+    transform: scale(0.95);
 }
 /* 文档卡片样式 */
 .document-card {

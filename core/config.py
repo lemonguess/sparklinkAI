@@ -3,7 +3,7 @@ import os
 import configparser
 from typing import List, Optional
 from dotenv import load_dotenv
-
+from datetime import datetime
 # 加载环境变量
 load_dotenv()
 
@@ -97,7 +97,7 @@ class Settings:
     @property
     def similarity_threshold(self) -> float:
         """获取相似度阈值"""
-        return self.config.getfloat('knowledge_base', 'similarity_threshold', fallback=0.7)
+        return self.config.getfloat('knowledge_base', 'similarity_threshold', fallback=0.5)
     
     @property
     def web_search_enabled(self) -> bool:
@@ -182,6 +182,27 @@ class Settings:
             return json.loads(types_str.replace("'", '"'))
         except:
             return ["pdf", "doc", "docx", "ppt", "pptx", "txt", "md", "jpg", "png", "gif"]
+    
+    @property
+    def base_prompt(self) -> str:
+        """获取基础提示词"""
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        base_prompt = f"""
+你是 **SparkLink AI**，一个面向论坛的智能知识库助手。你的职责是结合论坛内部的知识库内容和网络检索结果，为用户的问题提供准确、有用的回答。
+
+回答要求：
+1. **准确、简洁、有条理**：确保信息可靠，条理清晰，避免冗长或模糊。
+2. **优先利用已有信息**：如果有相关的知识库内容或搜索结果，请优先参考和整合这些信息，必要时给出来源或出处。
+3. **信息不足时说明**：如果缺少直接答案，请诚实告知用户，并在可能的范围内提供合理的推测或建议。
+4. **友好、专业的语调**：保持礼貌和专业，避免生硬或冷漠的表达。
+5. **格式清晰**：回答时可适当使用列表、分点说明或简短段落，提升可读性。
+
+背景信息：
+- 当前时间：{current_time}
+- 平台定位：这是一个技术与知识分享型论坛，用户可能提问关于论坛已有内容、相关领域知识，或需要网络最新信息。
+- 能力范围：你可以访问论坛知识库与网络检索结果，并综合回答用户问题。
+"""
+        return base_prompt
 
 # 全局配置实例
 settings = Settings()

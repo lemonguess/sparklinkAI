@@ -45,18 +45,19 @@ class ChatRequest(BaseModel):
     """聊天请求模型"""
     message: str = Field(..., min_length=1, max_length=10000)
     session_id: Optional[str] = None
-    session_name: Optional[str] = None  # 会话名称
-    is_first: bool = False  # 是否为新会话
-    user_id: Optional[str] = settings.default_user_id  # 用户ID，如果为空则使用默认用户ID
-    use_knowledge_base: bool = True
-    use_web_search: bool = True
-    stream: bool = True
+    user_id: Optional[str] = settings.default_user_id
+    is_first: bool = Field(default=False, description="是否为会话的第一条消息")
+    search_strategy: str = Field(default="auto", description="搜索策略: knowledge_only, web_only, hybrid, auto, none")
 
 class ChatMessage(BaseModel):
     """聊天消息模型"""
+    id: str
     role: str = Field(..., pattern="^(user|assistant|system)$")
     content: str
+    sequence_number: int
     created_at: datetime
+    sources: Optional[Dict[str, Any]] = None
+    thinking_process: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -159,6 +160,7 @@ class PostProcessRequest(BaseModel):
     title: Optional[str] = Field(None, max_length=200, description="文档标题")
     user_id: Optional[str] = Field(settings.default_user_id, description="用户ID")
     group_id: Optional[str] = Field(None, description="分组ID")
+    source_url: Optional[str] = Field("", description="文档来源URL")
     
 class DocumentQueryRequest(BaseModel):
     """文档查询请求模型"""
@@ -166,15 +168,17 @@ class DocumentQueryRequest(BaseModel):
     user_id: Optional[str] = settings.default_user_id
     group_id: Optional[str] = Field(None, description="分组ID，用于指定查询的知识库")
     top_k: int = Field(10, ge=1, le=100)
-    similarity_threshold: float = Field(0.7, ge=0.0, le=1.0)
+    similarity_threshold: float = Field(0.5, ge=0.0, le=1.0)
     collection_name: Optional[str] = None
 
 class KnowledgeSearchRequest(BaseModel):
     """知识库搜索请求模型"""
     query: str = Field(..., min_length=1, max_length=1000)
     top_k: int = Field(10, ge=1, le=100)
-    similarity_threshold: float = Field(0.7, ge=0.0, le=1.0)
-    collection_name: Optional[str] = None
+    similarity_threshold: float = Field(0.5, ge=0.0, le=1.0)
+    collection_name: Optional[str] = settings.MILVUS_COLLECTION_NAME  # 添加collection_name参数
+    group_id: Optional[str] = None  # 添加group_id参数
+    user_id: Optional[str] = settings.default_user_id  # 添加user_id参数
     response_time: Optional[float] = None
 
 # 知识库相关模型
@@ -278,7 +282,7 @@ class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
     search_type: str = Field("hybrid", pattern="^(knowledge_base|web_search|hybrid)$")
     top_k: int = Field(10, ge=1, le=50)
-    similarity_threshold: float = Field(0.7, ge=0.0, le=1.0)
+    similarity_threshold: float = Field(0.5, ge=0.0, le=1.0)
 
 class SearchResult(BaseModel):
     """搜索结果模型"""

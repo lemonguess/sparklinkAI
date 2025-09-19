@@ -4,10 +4,10 @@ from typing import List, Dict, Any, Optional, AsyncGenerator
 import json
 import time
 import uuid
-from openai import OpenAI
+from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 from core.config import settings
-from core.database import get_redis, get_db
+from core.database import get_db
 from core.shared_state import active_streams
 from models.database import ChatMessage as DBChatMessage
 from services.search_service import SearchService
@@ -23,11 +23,10 @@ class ChatService:
     """聊天服务类 - 集成智能搜索功能"""
     
     def __init__(self, db: Optional[Session] = None):
-        self.client = OpenAI(
+        self.client = AsyncOpenAI(
             api_key=settings.SILICONFLOW_API_KEY,
             base_url=settings.SILICONFLOW_BASE_URL
         )
-        self.redis_client = get_redis()
         self.db = db  # 数据库会话
         
         # 集成搜索服务
@@ -52,7 +51,7 @@ class ChatService:
         try:
             if strategy != SearchStrategy.NONE:
                 logger.info("🔍 执行知识库搜索")
-                knowledge_results = await self.knowledge_service.search(
+                knowledge_results = await self.knowledge_service.knowledge_search(
                     query=query,
                     top_k=kg_max_results
                 )
@@ -86,20 +85,18 @@ class ChatService:
                 else:
                     decision_reasoning = "根据关键词判断不需要网络搜索"
             logger.info(f"✅ 智能搜索完成: 知识库{len(knowledge_results)}条, 网络{len(web_results)}条")
-            
+            logger.info(f"决策依据: {decision_reasoning}")
             return {
                 'success': True,
                 'knowledge_results': knowledge_results,
-                'web_results': web_results,
-                'decision_reasoning': decision_reasoning
+                'web_results': web_results
             }
         except Exception as e:
             logger.error(f"智能搜索失败: {e}", exc_info=True)
             return {
                 'success': False,
                 'knowledge_results': [],
-                'web_results': [],
-                'decision_reasoning': f"智能搜索失败: {e}"
+                'web_results': []
             }
     
     async def generate_response(
@@ -187,7 +184,7 @@ class ChatService:
             
             # 流式生成
             try:
-                response = self.client.chat.completions.create(
+                response = await self.client.chat.completions.create(
                     model=settings.chat_model,
                     messages=messages,
                     max_tokens=settings.max_tokens,
@@ -195,7 +192,7 @@ class ChatService:
                     stream=True
                 )
                 
-                for chunk in response:
+                async for chunk in response:
                     # 检查是否被取消
                     if request_id and request_id in active_streams:
                         if active_streams[request_id].get('cancelled', False):
@@ -226,7 +223,7 @@ class ChatService:
     async def _generate_single_response(self, messages: List[Dict[str, str]]) -> str:
         """生成单次回复"""
         try:
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=settings.chat_model,
                 messages=messages,
                 max_tokens=settings.max_tokens,
@@ -247,14 +244,7 @@ class ChatService:
         web_search_results: List[Dict[str, Any]] = None
     ) -> str:
         """构建系统提示词"""
-        base_prompt = """你是SparkLink AI，一个智能助手。请根据用户的问题提供准确、有用的回答。
-
-回答要求：
-1. 回答要准确、简洁、有条理
-2. 如果有相关的知识库内容或搜索结果，请优先参考这些信息
-3. 如果信息不足，请诚实说明
-4. 保持友好、专业的语调
-"""
+        base_prompt = settings.base_prompt
         
         # 添加知识库信息
         if knowledge_sources:
@@ -276,53 +266,29 @@ class ChatService:
         return base_prompt
     
     async def _get_conversation_history(self, session_id: Optional[str]) -> List[Dict[str, str]]:
-        """获取对话历史"""
+        """获取会话的对话历史（仅从MySQL获取）"""
         if not session_id:
             return []
         
         try:
-            cache_key = f"session:{session_id}:messages"
-            
-            # 从Redis缓存获取
-            cached_history = self.redis_client.get(cache_key)
-            if cached_history:
-                logger.info(f"从Redis缓存获取会话 {session_id} 的聊天历史")
-                cached_data = json.loads(cached_history)
-                # 转换为简化格式用于对话上下文
-                return [{"role": msg["role"], "content": msg["content"]} for msg in cached_data]
-            
-            # 如果缓存中没有，从MySQL数据库获取
+            # 直接从MySQL数据库获取
             if self.db:
-                logger.info(f"Redis缓存未命中，从MySQL查询会话 {session_id} 的聊天历史")
+                logger.info(f"从MySQL查询会话 {session_id} 的聊天历史")
                 messages = self.db.query(DBChatMessage).filter(
                     DBChatMessage.session_id == session_id
                 ).order_by(DBChatMessage.created_at.asc()).limit(50).all()
                 
-                # 转换为完整格式
-                full_history = []
+                # 转换为简化格式用于对话上下文
                 simple_history = []
                 for msg in messages:
-                    msg_data = {
-                        "role": msg.role,
-                        "content": msg.content,
-                        "created_at": msg.created_at.timestamp() if msg.created_at else time.time()
-                    }
-                    if msg.knowledge_sources:
-                        msg_data["knowledge_sources"] = json.loads(msg.knowledge_sources)
-                    if msg.web_search_results:
-                        msg_data["web_search_results"] = json.loads(msg.web_search_results)
+                    # 对于助手消息，如果有思考过程，只使用content部分（不包含thinking_process）
+                    # 对于用户消息，直接使用content
+                    content = msg.content
+                    if msg.role == "assistant" and msg.thinking_process:
+                        # 助手消息只使用答案部分，不包含思考过程
+                        content = msg.content
                     
-                    full_history.append(msg_data)
-                    simple_history.append({"role": msg.role, "content": msg.content})
-                
-                # 将完整格式缓存到Redis（24小时过期）
-                if full_history:
-                    self.redis_client.setex(
-                        cache_key,
-                        86400,  # 24小时
-                        json.dumps(full_history, ensure_ascii=False)
-                    )
-                    logger.info(f"已将会话 {session_id} 的 {len(full_history)} 条消息缓存到Redis")
+                    simple_history.append({"role": msg.role, "content": content})
                 
                 return simple_history
             else:
@@ -341,15 +307,16 @@ class ChatService:
         knowledge_sources: Optional[List[Dict[str, Any]]] = None,
         web_search_results: Optional[List[Dict[str, Any]]] = None,
         user_request_id: Optional[str] = None,
-        assistant_request_id: Optional[str] = None
+        assistant_request_id: Optional[str] = None,
+        thinking_process: Optional[str] = None
     ):
-        """保存对话历史到MySQL和Redis缓存"""
+        """保存对话历史到MySQL数据库"""
         try:
             # 生成请求ID
             user_req_id = user_request_id or uuid.uuid4().hex
             assistant_req_id = assistant_request_id or uuid.uuid4().hex
             
-            # 1. 保存到MySQL数据库
+            # 保存到MySQL数据库
             if self.db:
                 # 获取当前会话的最大序号
                 max_sequence = self.db.query(DBChatMessage.sequence_number).filter(
@@ -376,47 +343,14 @@ class ChatService:
                     content=assistant_message,
                     sequence_number=next_sequence + 1,
                     knowledge_sources=json.dumps(knowledge_sources, ensure_ascii=False) if knowledge_sources else None,
-                    web_search_results=json.dumps(web_search_results, ensure_ascii=False) if web_search_results else None
+                    web_search_results=json.dumps(web_search_results, ensure_ascii=False) if web_search_results else None,
+                    thinking_process=thinking_process
                 )
                 self.db.add(assistant_msg)
                 self.db.commit()
                 logger.info(f"已保存会话 {session_id} 的对话到MySQL数据库")
             else:
                 logger.warning("数据库会话未初始化，无法保存到MySQL")
-            
-            # 2. 更新Redis缓存
-            cache_key = f"session:{session_id}:messages"
-            
-            # 获取现有历史
-            existing_history = await self._get_conversation_history(session_id)
-            
-            # 添加新的对话
-            existing_history.extend([
-                {
-                    "role": "user", 
-                    "content": user_message,
-                    "created_at": time.time()
-                },
-                {
-                    "role": "assistant", 
-                    "content": assistant_message,
-                    "created_at": time.time(),
-                    "knowledge_sources": knowledge_sources,
-                    "web_search_results": web_search_results
-                }
-            ])
-            
-            # 保持最近50条消息
-            if len(existing_history) > 50:
-                existing_history = existing_history[-50:]
-            
-            # 保存到Redis，过期时间24小时
-            self.redis_client.setex(
-                cache_key,
-                86400,  # 24小时
-                json.dumps(existing_history, ensure_ascii=False)
-            )
-            logger.info(f"已更新会话 {session_id} 的Redis缓存，共 {len(existing_history)} 条消息")
             
         except Exception as e:
             logger.warning(f"保存对话历史失败: {e}")
@@ -489,12 +423,19 @@ class ChatService:
             )
     
     async def clear_conversation_history(self, session_id: str):
-        """清除对话历史"""
+        """清除对话历史（仅从MySQL删除）"""
         try:
-            cache_key = f"chat_history:{session_id}"
-            self.redis_client.delete(cache_key)
+            if self.db:
+                # 从MySQL删除会话的所有消息
+                self.db.query(DBChatMessage).filter(
+                    DBChatMessage.session_id == session_id
+                ).delete()
+                self.db.commit()
+                logger.info(f"已从MySQL删除会话 {session_id} 的所有消息")
         except Exception as e:
             logger.warning(f"清除对话历史失败: {e}")
+            if self.db:
+                self.db.rollback()
     
     def get_model_info(self) -> Dict[str, Any]:
         """获取模型信息"""
@@ -519,7 +460,7 @@ class ChatService:
 3. 不要包含标点符号
 4. 直接返回标题，不要其他内容"""
             
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=settings.chat_model,
                 messages=[
                     {"role": "user", "content": prompt}
@@ -555,7 +496,7 @@ class ChatService:
 3. 不要包含标点符号
 4. 直接返回标题，不要其他内容"""
             
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=settings.chat_model,
                 messages=[
                     {"role": "user", "content": prompt}
@@ -579,7 +520,7 @@ class ChatService:
     async def test_connection(self) -> bool:
         """测试连接"""
         try:
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=settings.chat_model,
                 messages=[
                     {"role": "user", "content": "Hello"}

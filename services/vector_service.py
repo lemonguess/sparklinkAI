@@ -389,13 +389,17 @@ class VectorService:
         collection_name: str,
         query_embedding: List[float],
         top_k: int = 10,
-        similarity_threshold: float = 0.7,
+        similarity_threshold: float = None,
         user_id: str = None
     ) -> List[Dict[str, Any]]:
         """搜索向量"""
         # 如果没有提供user_id，使用默认值
         if user_id is None:
             user_id = settings.default_user_id
+        
+        # 如果没有提供相似度阈值，使用配置文件中的默认值
+        if similarity_threshold is None:
+            similarity_threshold = settings.similarity_threshold
             
         return await self.search_vectors_async(
             collection_name, query_embedding, top_k, similarity_threshold, user_id
@@ -406,11 +410,15 @@ class VectorService:
         collection_name: str,
         query_embedding: List[float],
         top_k: int = 10,
-        similarity_threshold: float = 0.7,
+        similarity_threshold: float = None,
         user_id: str = None,
         group_id: str = None,
     ) -> List[Dict[str, Any]]:
         """搜索向量（异步）"""
+        # 如果没有提供相似度阈值，使用配置文件中的默认值
+        if similarity_threshold is None:
+            similarity_threshold = settings.similarity_threshold
+            
         if not self._connected:
             await self.connect()
         
@@ -442,7 +450,7 @@ class VectorService:
             if user_id:
                 filter_conditions.append(f'user_id == "{user_id}"')
             if group_id is not None:
-                filter_conditions.append(f'group_id == {group_id}')
+                filter_conditions.append(f'group_id == "{group_id}"')
             
             filter_expr = " and ".join(filter_conditions) if filter_conditions else None
             
