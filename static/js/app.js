@@ -524,7 +524,7 @@ class SparkLinkApp {
         // 显示知识召回检测面板
         const testPanel = document.querySelector('.knowledge-test-panel');
         if (testPanel) {
-            testPanel.style.display = 'block';
+            testPanel.style.display = 'flex';
         }
         
         // 加载该知识库的文档
