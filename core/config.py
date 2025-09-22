@@ -107,7 +107,7 @@ class Settings:
     @property
     def knowledge_confidence_threshold(self) -> float:
         """知识库置信度阈值"""
-        return self.config.getfloat('search', 'knowledge_confidence_threshold', fallback=0.8)
+        return self.config.getfloat('search', 'knowledge_confidence_threshold', fallback=0.5)
     
     @property
     def cors_origins(self) -> List[str]:
@@ -161,6 +161,21 @@ class Settings:
     def default_user_id(self) -> str:
         """获取默认用户ID"""
         return self.config.get('default_user', 'id', fallback='admin123456789abcdef0123456789ab')
+    
+    @property
+    def default_kb_group_id(self) -> str:
+        """获取默认知识库分组ID"""
+        return self.config.get('default_kb_group', 'id', fallback='default_kb_group_123456789abcdef')
+    
+    @property
+    def default_kb_group_name(self) -> str:
+        """获取默认知识库分组名称"""
+        return self.config.get('default_kb_group', 'name', fallback='默认知识库')
+    
+    @property
+    def default_kb_group_description(self) -> str:
+        """获取默认知识库分组描述"""
+        return self.config.get('default_kb_group', 'description', fallback='系统自动创建的默认知识库分组')
     
     @property
     def upload_dir(self) -> str:

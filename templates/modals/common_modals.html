@@ -1,0 +1,139 @@
+<!-- 新建知识库模态框 -->
+<div id="newKnowledgeBaseModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>新建知识库</h3>
+            <span class="close" onclick="app.hideNewKnowledgeBaseModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="kbGroupName">知识库名称 *</label>
+                <input type="text" id="kbGroupName" placeholder="请输入知识库名称" required>
+            </div>
+            <div class="form-group">
+                <label for="kbDescription">描述（可选）</label>
+                <textarea id="kbDescription" placeholder="请输入知识库描述" rows="3"></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" id="cancelNewKbBtn">取消</button>
+            <button type="button" class="btn btn-primary" id="createKbBtn">创建</button>
+        </div>
+    </div>
+</div>
+
+<!-- 文档上传模态框 -->
+<div id="uploadModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-upload"></i> 上传文档</h3>
+            <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                </div>
+                <p>拖拽文件到此处或点击选择文件</p>
+                <p class="upload-hint">支持 PDF, DOC, DOCX, TXT, MD 等格式</p>
+                <input type="file" id="fileInput" multiple accept=".pdf,.doc,.docx,.txt,.md,.ppt,.pptx">
+            </div>
+            <div class="knowledge-base-select">
+                <label for="kbSelect">选择知识库:</label>
+                <select id="kbSelect">
+                    <option value="1">默认知识库</option>
+                </select>
+            </div>
+            <div id="uploadProgress" class="upload-progress" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill"></div>
+                </div>
+                <div class="progress-text">上传中...</div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelUploadBtn" class="btn-secondary">取消</button>
+            <button id="confirmUploadBtn" class="btn-primary">上传</button>
+        </div>
+    </div>
+</div>
+
+<!-- 文本上传模态框 -->
+<div id="addTextModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-plus"></i> 添加文本内容</h3>
+            <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="textTitle">标题 *</label>
+                <input type="text" id="textTitle" placeholder="请输入文档标题" required>
+            </div>
+            <div class="form-group">
+                <label for="textContent">内容 *</label>
+                <textarea id="textContent" rows="10" placeholder="请输入文档内容" required></textarea>
+            </div>
+            <div class="form-group">
+                <label for="textSourceUrl">来源URL</label>
+                <input type="url" id="textSourceUrl" placeholder="请输入文档来源URL（可选）">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelTextBtn" class="btn-secondary">取消</button>
+            <button id="confirmTextBtn" class="btn-primary">添加</button>
+        </div>
+    </div>
+</div>
+
+<!-- 设置模态框 -->
+<div id="settingsModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-cog"></i> 设置</h3>
+            <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="setting-group">
+                <h4>聊天设置</h4>
+                <div class="setting-item">
+                    <label for="maxTokens">最大回复长度:</label>
+                    <input type="number" id="maxTokens" value="2000" min="100" max="4000">
+                </div>
+                <div class="setting-item">
+                    <label for="temperature">创造性 (0-1):</label>
+                    <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.7">
+                    <span id="temperatureValue">0.7</span>
+                </div>
+            </div>
+            <div class="setting-group">
+                <h4>搜索设置</h4>
+                <div class="setting-item">
+                    <label for="searchTopK">搜索结果数量:</label>
+                    <input type="number" id="searchTopK" value="5" min="1" max="20">
+                </div>
+                <div class="setting-item">
+                    <label for="similarityThreshold">相似度阈值:</label>
+                    <input type="range" id="similarityThreshold" min="0" max="1" step="0.05" value="0.7">
+                    <span id="similarityValue">0.7</span>
+                </div>
+            </div>
+            <div class="setting-group">
+                <h4>知识库设置</h4>
+                <div class="setting-item">
+                    <label for="knowledgeBaseSelect">选择知识库:</label>
+                    <select id="knowledgeBaseSelect">
+                        <option value="">加载中...</option>
+                    </select>
+                    <button id="refreshKbListBtn" class="btn-icon" title="刷新知识库列表">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button id="resetSettingsBtn" class="btn-secondary">重置</button>
+            <button id="saveSettingsBtn" class="btn-primary">保存</button>
+        </div>
+    </div>
+</div>

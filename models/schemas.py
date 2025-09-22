@@ -43,11 +43,16 @@ class UserResponse(BaseModel):
 # 聊天相关模型
 class ChatRequest(BaseModel):
     """聊天请求模型"""
-    message: str = Field(..., min_length=1, max_length=10000)
-    session_id: Optional[str] = None
-    user_id: Optional[str] = settings.default_user_id
-    is_first: bool = Field(default=False, description="是否为会话的第一条消息")
-    search_strategy: str = Field(default="auto", description="搜索策略: knowledge_only, web_only, hybrid, auto, none")
+    message: str = Field(..., min_length=1, max_length=10000, description="用户消息")
+    user_id: str = Field(settings.default_user_id, description="用户ID")
+    session_id: Optional[str] = Field(None, description="会话ID，如果为空则创建新会话")
+    is_first: bool = Field(False, description="是否为新会话的第一条消息")
+    search_strategy: str = Field("auto", description="搜索策略")
+    max_tokens: int = Field(settings.max_tokens, ge=100, le=4000, description="最大回复长度")
+    temperature: float = Field(settings.temperature, ge=0.0, le=1.0, description="创造性参数")
+    search_top_k: int = Field(settings.top_k, ge=1, le=20, description="搜索结果数量")
+    similarity_threshold: float = Field(settings.knowledge_confidence_threshold, ge=0.0, le=1.0, description="相似度阈值")
+    group_id: Optional[str] = Field(settings.default_kb_group_id, description="知识库分组ID")
 
 class ChatMessage(BaseModel):
     """聊天消息模型"""

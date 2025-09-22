@@ -15,7 +15,8 @@ class SparkLinkApp {
             maxTokens: 2000,
             temperature: 0.7,
             searchTopK: 5,
-            similarityThreshold: 0.7
+            similarityThreshold: 0.7,
+            selectedKnowledgeBase: null
         };
         this.currentReader = null; // 用于停止流式输出
         this.currentRequestId = null; // 用于停止流式输出
@@ -157,6 +158,21 @@ class SparkLinkApp {
                 }
             }
         });
+    }
+
+    // 确保指定区域展开
+    ensureSectionExpanded(sectionId) {
+        const header = document.querySelector(`[data-target="${sectionId}"]`);
+        const targetElement = document.getElementById(sectionId);
+        
+        if (header && targetElement) {
+            // 移除折叠状态
+            header.classList.remove('collapsed');
+            targetElement.classList.remove('collapsed');
+            
+            // 更新localStorage状态
+            localStorage.setItem(`sidebar-${sectionId}-collapsed`, 'false');
+        }
     }
     
     bindEvents() {
@@ -306,9 +322,12 @@ class SparkLinkApp {
         
         document.getElementById('confirmTextBtn').addEventListener('click', () => this.uploadText());
         
-        // 设置模态框按钮
+        // 设置按钮事件
         document.getElementById('saveSettingsBtn').addEventListener('click', () => this.saveSettings());
         document.getElementById('resetSettingsBtn').addEventListener('click', () => this.resetSettings());
+        
+        // 知识库刷新按钮事件
+        document.getElementById('refreshKbListBtn').addEventListener('click', () => this.loadKnowledgeBasesForSettings());
         
         // 设置滑块值显示
         document.getElementById('temperature').addEventListener('input', (e) => {
@@ -765,9 +784,8 @@ class SparkLinkApp {
     
     // 删除文档
     async deleteDocument(docId, docName) {
-        if (!confirm(`确定要删除文档 "${docName}" 吗？`)) {
-            return;
-        }
+        const confirmed = await Utils.Modal.confirm(`确定要删除文档 "${docName}" 吗？`, '删除文档');
+        if (!confirmed) return;
         
         try {
             const response = await fetch(`/api/v1/kb/document/delete`, {
@@ -842,6 +860,9 @@ class SparkLinkApp {
                 if (result.success) {
                     // 创建成功，设置当前会话ID
                     this.currentSessionId = result.data.id;
+                    
+                    // 确保会话区域展开
+                    this.ensureSectionExpanded('sessionsList');
                     
                     // 重新加载会话列表
                     await this.loadSessions();
@@ -1070,9 +1091,8 @@ class SparkLinkApp {
     }
     
     async deleteSession(sessionId, sessionTitle) {
-        if (!confirm(`确定要删除会话"${sessionTitle}"吗？\n\n注意：此操作将永久删除会话及其所有消息，无法恢复。`)) {
-            return;
-        }
+        const confirmed = await Utils.Modal.confirm(`确定要删除会话"${sessionTitle}"吗？\n\n注意：此操作将永久删除会话及其所有消息，无法恢复。`, '删除会话');
+        if (!confirmed) return;
         
         try {
             const response = await fetch('/api/v1/chat/sessions/delete', {
@@ -1264,7 +1284,10 @@ class SparkLinkApp {
                     is_first: isFirstMessage,
                     search_strategy: searchStrategy,
                     max_tokens: this.settings.maxTokens,
-                    temperature: this.settings.temperature
+                    temperature: this.settings.temperature,
+                    search_top_k: this.settings.searchTopK,
+                    similarity_threshold: this.settings.similarityThreshold,
+                    group_id: this.settings.selectedKnowledgeBase
                 })
             });
             
@@ -1629,10 +1652,11 @@ class SparkLinkApp {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
     
-    clearChat() {
+    async clearChat() {
         if (!this.currentSessionId) return;
         
-        if (confirm('确定要清空当前会话的所有消息吗？')) {
+        const confirmed = await Utils.Modal.confirm('确定要清空当前会话的所有消息吗？', '清空会话');
+        if (confirmed) {
             const chatMessages = document.getElementById('chatMessages');
             chatMessages.innerHTML = `
                 <div class="welcome-message">
@@ -1720,6 +1744,9 @@ class SparkLinkApp {
                 if (result.success) {
                     this.showToast('文本添加成功', 'success');
                     document.getElementById('addTextModal').style.display = 'none';
+                    
+                    // 确保知识库区域展开
+                    this.ensureSectionExpanded('knowledgeBasesList');
                     
                     // 如果当前选中的知识库就是上传的知识库，刷新文档列表
                     if (kbId === this.currentKnowledgeBaseId) {
@@ -1883,6 +1910,9 @@ class SparkLinkApp {
     
     
     showSettingsModal() {
+        // 加载知识库列表到设置模态框
+        this.loadKnowledgeBasesForSettings();
+        
         // 加载当前设置到表单
         document.getElementById('maxTokens').value = this.settings.maxTokens;
         document.getElementById('temperature').value = this.settings.temperature;
@@ -1891,7 +1921,58 @@ class SparkLinkApp {
         document.getElementById('similarityThreshold').value = this.settings.similarityThreshold;
         document.getElementById('similarityValue').textContent = this.settings.similarityThreshold;
         
+        // 设置知识库选择
+        const kbSelect = document.getElementById('knowledgeBaseSelect');
+        if (kbSelect && this.settings.selectedKnowledgeBase) {
+            kbSelect.value = this.settings.selectedKnowledgeBase;
+        }
+        
         document.getElementById('settingsModal').style.display = 'block';
+    }
+
+    // 加载知识库列表到设置模态框
+    async loadKnowledgeBasesForSettings() {
+        try {
+            const response = await fetch('/api/v1/kb/group/get_groups', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    user_id: null // 使用默认用户ID
+                })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                    const kbSelect = document.getElementById('knowledgeBaseSelect');
+                    if (kbSelect) {
+                        // 清空现有选项
+                        kbSelect.innerHTML = '<option value="">请选择知识库</option>';
+                        
+                        // 添加知识库选项
+                        result.data.forEach(kb => {
+                            const option = document.createElement('option');
+                            option.value = kb.id;
+                            option.textContent = kb.group_name;
+                            kbSelect.appendChild(option);
+                        });
+                        
+                        // 设置当前选中的知识库
+                        if (this.settings.selectedKnowledgeBase) {
+                            kbSelect.value = this.settings.selectedKnowledgeBase;
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('加载知识库列表失败:', error);
+            const kbSelect = document.getElementById('knowledgeBaseSelect');
+            if (kbSelect) {
+                kbSelect.innerHTML = '<option value="">加载失败</option>';
+            }
+        }
     }
 
     handleFileSelection(files) {
@@ -2000,6 +2081,10 @@ class SparkLinkApp {
             }
             
             this.showToast('文件上传成功', 'success');
+            
+            // 确保知识库区域展开
+            this.ensureSectionExpanded('knowledgeBasesList');
+            
             // 上传成功后刷新当前知识库文档
             await this.loadDocuments();
             this.hideUploadModal();
@@ -2137,6 +2222,9 @@ class SparkLinkApp {
             
             this.showToast('知识库创建成功', 'success');
             
+            // 确保知识库区域展开
+            this.ensureSectionExpanded('knowledgeBasesList');
+            
             // 刷新知识库列表
             await this.loadKnowledgeBases();
             this.hideNewKnowledgeBaseModal();
@@ -2178,7 +2266,8 @@ class SparkLinkApp {
     }
     
     async deleteKnowledgeBase(id, name) {
-        if (!confirm(`确定要删除知识库"${name}"吗？此操作不可恢复。`)) return;
+        const confirmed = await Utils.Modal.confirm(`确定要删除知识库"${name}"吗？此操作不可恢复。`, '删除知识库');
+        if (!confirmed) return;
         
         try {
             const response = await fetch(`/api/v1/kb/group/delete_group`, {
@@ -2191,12 +2280,14 @@ class SparkLinkApp {
                 })
             });
             
-            if (!response.ok) {
-                throw new Error('删除失败');
-            }
+            const result = await response.json();
             
-            this.showToast('知识库删除成功', 'success');
-            await this.loadKnowledgeBases();
+            if (response.ok && result.success) {
+                this.showToast('知识库删除成功', 'success');
+                await this.loadKnowledgeBases();
+            } else {
+                this.showToast(result.message || '删除失败', 'error');
+            }
             
         } catch (error) {
             console.error('删除知识库失败:', error);
@@ -2210,6 +2301,12 @@ class SparkLinkApp {
         this.settings.searchTopK = parseInt(document.getElementById('searchTopK').value);
         this.settings.similarityThreshold = parseFloat(document.getElementById('similarityThreshold').value);
         
+        // 保存知识库选择
+        const kbSelect = document.getElementById('knowledgeBaseSelect');
+        if (kbSelect) {
+            this.settings.selectedKnowledgeBase = kbSelect.value || null;
+        }
+        
         localStorage.setItem('sparklink_settings', JSON.stringify(this.settings));
         document.getElementById('settingsModal').style.display = 'none';
         this.showToast('设置已保存', 'success');
@@ -2220,7 +2317,8 @@ class SparkLinkApp {
             maxTokens: 2000,
             temperature: 0.7,
             searchTopK: 5,
-            similarityThreshold: 0.7
+            similarityThreshold: 0.7,
+            selectedKnowledgeBase: null
         };
         
         localStorage.removeItem('sparklink_settings');
@@ -2236,12 +2334,26 @@ class SparkLinkApp {
     }
     
     showToast(message, type = 'info') {
-        const toast = document.getElementById('toast');
+        // 创建新的 toast 元素，与 chat.js 保持一致
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
         toast.textContent = message;
-        toast.className = `toast ${type} show`;
         
+        document.body.appendChild(toast);
+        
+        // 显示动画
+        setTimeout(() => {
+            toast.classList.add('show');
+        }, 100);
+        
+        // 自动隐藏
         setTimeout(() => {
             toast.classList.remove('show');
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            }, 300);
         }, 3000);
     }
     

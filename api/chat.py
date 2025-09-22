@@ -274,6 +274,9 @@ async def chat_stream(
                 search_result = await chat_service.intelligent_search(
                     query=request.message,
                     strategy=SearchStrategy(request.search_strategy),
+                    kg_max_results=request.search_top_k,
+                    similarity_threshold=request.similarity_threshold,
+                    group_id=request.group_id
                 )
                 yield f"data: {json.dumps({'type': 'source', 'content': search_result}, ensure_ascii=False)}\n\n"
                 async for _type, chunk in chat_service.generate_stream_response(
@@ -282,6 +285,9 @@ async def chat_stream(
                     web_search_results=search_result['web_results'],
                     request_id=request_id,
                     session_id=session_id,
+                    is_first=request.is_first,
+                    max_tokens=request.max_tokens,
+                    temperature=request.temperature
                 ):
                     if _type == 'content':
                         full_response += chunk

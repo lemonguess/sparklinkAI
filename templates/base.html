@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SparkLink AI - 智能聊天助手{% endblock %}</title>
+    
+    <!-- 基础样式 -->
+    <link rel="stylesheet" href="/static/css/common.css">
+    {% block extra_css %}{% endblock %}
+    
+    <!-- 外部依赖 -->
+    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="/static/libs/marked.min.js"></script>
+</head>
+<body>
+    <!-- 页面加载指示器 -->
+    <div id="pageLoader" class="page-loader">
+        <div class="loader-content">
+            <div class="loader-spinner"></div>
+            <p>正在加载 SparkLink AI...</p>
+        </div>
+    </div>
+    
+    <div class="app-container">
+        <!-- 侧边栏 -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2 class="brand-title" onclick="window.location.reload()">
+                    <i class="fas fa-robot"></i> SparkLink AI
+                </h2>
+            </div>
+            
+            <!-- 会话列表 -->
+            <div class="sessions-section">
+                <div class="section-header collapsible" data-target="sessionsList">
+                    <div class="header-content">
+                        <h3><i class="fas fa-comments"></i> 会话</h3>
+                        <i class="fas fa-chevron-down collapse-icon"></i>
+                    </div>
+                    <button id="newSessionBtn" class="btn-icon" title="新建会话">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                </div>
+                <div id="sessionsList" class="sessions-list collapsible-content">
+                    <!-- 会话列表将在这里动态加载 -->
+                </div>
+            </div>
+            
+            <!-- 知识库管理 -->
+            <div class="knowledge-section">
+                <div class="section-header collapsible" data-target="knowledgeList">
+                    <div class="header-content">
+                        <h3><i class="fas fa-database"></i> 知识库</h3>
+                        <i class="fas fa-chevron-down collapse-icon"></i>
+                    </div>
+                    <div class="header-actions">
+                        <button id="newKnowledgeBaseBtn" class="btn-icon" title="新建知识库">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="knowledgeList" class="knowledge-list collapsible-content">
+                    <!-- 知识库列表将在这里动态加载 -->
+                </div>
+            </div>
+            
+            <!-- 系统状态 -->
+            <div class="status-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-heartbeat"></i> 系统状态</h3>
+                </div>
+                <div id="systemStatus" class="status-info">
+                    <div class="status-item">
+                        <span class="status-label">数据库:</span>
+                        <span id="dbStatus" class="status-value">检查中...</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Redis:</span>
+                        <span id="redisStatus" class="status-value">检查中...</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">向量库:</span>
+                        <span id="milvusStatus" class="status-value">检查中...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 主内容区 -->
+        <div class="main-content">
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+    
+    <!-- 公共模态框 -->
+    {% include 'modals/common_modals.html' %}
+    
+    <!-- Toast 通知 -->
+    <div id="toast" class="toast"></div>
+    
+    <!-- 加载指示器 -->
+    <div id="loadingIndicator" class="loading-indicator" style="display: none;">
+        <div class="spinner"></div>
+        <span>处理中...</span>
+    </div>
+    
+    <!-- 基础脚本 -->
+    <script src="/static/js/utils.js"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

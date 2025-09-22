@@ -1,362 +1,176 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SparkLink AI - 智能聊天助手</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script src="/static/libs/marked.min.js"></script>
-</head>
-<body>
-    <!-- 页面加载指示器 -->
-    <div id="pageLoader" class="page-loader">
-        <div class="loader-content">
-            <div class="loader-spinner"></div>
-            <p>正在加载 SparkLink AI...</p>
+{% extends "base.html" %}
+
+{% block title %}SparkLink AI - 智能聊天助手{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/style.css">
+<link rel="stylesheet" href="/static/css/chat.css">
+<link rel="stylesheet" href="/static/css/knowledge.css">
+{% endblock %}
+
+{% block content %}
+<!-- 聊天界面 - 默认显示 -->
+<div class="chat-container" id="chatContainer">
+    <div class="chat-header">
+        <h3 id="currentSessionTitle"><i class="fas fa-comments"></i> SparkLink AI 聊天助手</h3>
+        <div class="chat-actions">
+            <button class="btn-icon" id="clearChatBtn" title="清空聊天">
+                <i class="fas fa-trash"></i>
+            </button>
+            <button class="btn-icon" id="settingsBtn" title="设置">
+                <i class="fas fa-cog"></i>
+            </button>
         </div>
     </div>
-    
-    <div class="app-container">
-        <!-- 侧边栏 -->
-        <div class="sidebar">
-            <div class="sidebar-header">
-                <h2 class="brand-title" onclick="window.location.reload()"><i class="fas fa-robot"></i> SparkLink AI</h2>
+    <div class="chat-messages" id="chatMessages">
+        <div class="welcome-message">
+            <div class="welcome-icon">
+                <i class="fas fa-robot"></i>
             </div>
-            
-            <!-- 会话列表 -->
-            <div class="sessions-section">
-                <div class="section-header collapsible" data-target="sessionsList">
-                    <div class="header-content">
-                        <h3><i class="fas fa-comments"></i> 会话</h3>
-                        <i class="fas fa-chevron-down collapse-icon"></i>
-                    </div>
-                    <button id="newSessionBtn" class="btn-icon" title="新建会话">
-                        <i class="fas fa-plus"></i>
+            <h3>欢迎使用 SparkLink AI</h3>
+            <p>我是您的智能助手，可以帮您回答问题、处理文档和进行知识检索。</p>
+            <div class="quick-actions">
+                <button class="quick-btn" onclick="sendQuickMessage('你好，请介绍一下你的功能')">
+                    <i class="fas fa-hand-wave"></i> 打个招呼
+                </button>
+                <button class="quick-btn" onclick="sendQuickMessage('帮我总结一下知识库的内容')">
+                    <i class="fas fa-book"></i> 知识总结
+                    </button>
+                    <button class="quick-btn" onclick="sendQuickMessage('如何使用这个系统？')">
+                        <i class="fas fa-question-circle"></i> 使用帮助
                     </button>
                 </div>
-                <div id="sessionsList" class="sessions-list collapsible-content">
-                    <!-- 会话列表将在这里动态加载 -->
-                </div>
-            </div>
-            
-            <!-- 知识库管理 -->
-            <div class="knowledge-section">
-                <div class="section-header collapsible" data-target="knowledgeList">
-                    <div class="header-content">
-                        <h3><i class="fas fa-database"></i> 知识库</h3>
-                        <i class="fas fa-chevron-down collapse-icon"></i>
-                    </div>
-                    <div class="header-actions">
-                        <button id="newKnowledgeBaseBtn" class="btn-icon" title="新建知识库">
-                            <i class="fas fa-plus"></i>
-                        </button>
-                    </div>
-                </div>
-                <div id="knowledgeList" class="knowledge-list collapsible-content">
-                    <!-- 知识库列表将在这里动态加载 -->
-                </div>
-            </div>
-            
-            <!-- 系统状态 -->
-            <div class="status-section">
-                <div class="section-header">
-                    <h3><i class="fas fa-heartbeat"></i> 系统状态</h3>
-                </div>
-                <div id="systemStatus" class="status-info">
-                    <div class="status-item">
-                        <span class="status-label">数据库:</span>
-                        <span id="dbStatus" class="status-value">检查中...</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">Redis:</span>
-                        <span id="redisStatus" class="status-value">检查中...</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">向量库:</span>
-                        <span id="milvusStatus" class="status-value">检查中...</span>
-                    </div>
-                </div>
             </div>
         </div>
-        
-        <!-- 主内容区 -->
-        <div class="main-content">
-            <!-- 聊天界面 - 默认显示 -->
-            <div class="chat-container" id="chatContainer">
-                <div class="chat-header">
-                    <h3 id="currentSessionTitle"><i class="fas fa-comments"></i> SparkLink AI 聊天助手</h3>
-                    <div class="chat-actions">
-                        <button class="btn-icon" id="clearChatBtn" title="清空聊天">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                        <button class="btn-icon" id="settingsBtn" title="设置">
-                            <i class="fas fa-cog"></i>
-                        </button>
-                    </div>
+        <div class="chat-input-container">
+            <div class="input-wrapper">
+                <div class="input-left-controls">
+                    <button class="strategy-btn" id="knowledgeBtn" data-strategy="knowledge_only" title="仅使用知识库">
+                        <i class="fas fa-database"></i>
+                    </button>
+                    <button class="strategy-btn" id="webBtn" data-strategy="web_only" title="仅使用网络搜索">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    <button class="strategy-btn active" id="autoBtn" data-strategy="auto" title="自动选择策略">
+                        <i class="fas fa-magic"></i>
+                    </button>
                 </div>
-                <div class="chat-messages" id="chatMessages">
-                    <div class="welcome-message">
-                        <div class="welcome-icon">
-                            <i class="fas fa-robot"></i>
-                        </div>
-                        <h3>欢迎使用 SparkLink AI</h3>
-                        <p>我是您的智能助手，可以帮您回答问题、处理文档和进行知识检索。</p>
-                        <div class="quick-actions">
-                            <button class="quick-btn" onclick="sendQuickMessage('你好，请介绍一下你的功能')">
-                                <i class="fas fa-hand-wave"></i> 打个招呼
-                            </button>
-                            <button class="quick-btn" onclick="sendQuickMessage('帮我总结一下知识库的内容')">
-                                <i class="fas fa-book"></i> 知识总结
-                            </button>
-                            <button class="quick-btn" onclick="sendQuickMessage('如何使用这个系统？')">
-                                <i class="fas fa-question-circle"></i> 使用帮助
-                            </button>
-                        </div>
-                    </div>
+                <textarea id="messageInput" placeholder="输入您的问题..." rows="1"></textarea>
+                <div class="input-right-controls">
+                    <button id="sendBtn" class="btn-send" title="发送消息">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                    <button id="stopBtn" class="btn-stop" title="停止生成" style="display: none;">
+                        <i class="fas fa-stop"></i>
+                    </button>
                 </div>
-                <div class="chat-input-container">
-                    <div class="input-wrapper">
-                        <div class="input-left-controls">
-                            <button class="strategy-btn" id="knowledgeBtn" data-strategy="knowledge_only" title="仅使用知识库">
-                                <i class="fas fa-database"></i>
-                            </button>
-                            <button class="strategy-btn" id="webBtn" data-strategy="web_only" title="仅使用网络搜索">
-                                <i class="fas fa-search"></i>
-                            </button>
-                            <button class="strategy-btn active" id="autoBtn" data-strategy="auto" title="自动选择策略">
-                                <i class="fas fa-magic"></i>
-                            </button>
-                        </div>
-                        <textarea id="messageInput" placeholder="输入您的问题..." rows="1"></textarea>
-                        <div class="input-right-controls">
-                            <button id="sendBtn" class="btn-send" title="发送消息">
-                                <i class="fas fa-paper-plane"></i>
-                            </button>
-                            <button id="stopBtn" class="btn-stop" title="停止生成" style="display: none;">
-                                <i class="fas fa-stop"></i>
-                            </button>
-                        </div>
-                    </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 知识库管理区域 - 默认隐藏 -->
-            <div class="knowledge-container" id="knowledgeContainer" style="display: none;">
-                <!-- 文档管理区域 -->
-                <div class="document-panel" id="documentPanel">
-                    <div class="panel-header">
-                        <h3><i class="fas fa-folder-open"></i> 文档管理</h3>
-                        <div class="panel-actions">
-                            <button class="btn btn-primary" id="uploadDocBtn">
-                                <i class="fas fa-upload"></i> 上传文档
-                            </button>
-                            <button class="btn btn-secondary" id="addTextBtn">
-                                <i class="fas fa-plus"></i> 添加文本
-                            </button>
-                            <button class="btn btn-secondary" id="refreshDocsBtn">
-                                <i class="fas fa-sync-alt"></i> 刷新
-                            </button>
-                        </div>
-                    </div>
-                    <div class="document-list" id="documentList">
-                        <div class="loading">加载中...</div>
-                    </div>
-                </div>
-
-                <!-- 知识召回检测区域 -->
-                <div class="knowledge-test-panel">
-                    <div class="panel-header">
-                        <h3><i class="fas fa-search"></i> 知识召回检测</h3>
-                    </div>
-                    <div class="test-controls">
-                        <div class="input-group">
-                            <input type="text" id="testQuery" placeholder="输入测试查询..." class="form-control">
-                            <button class="btn btn-primary" id="runTestBtn">
-                                <i class="fas fa-play"></i> 检索
-                            </button>
-                            <button class="btn btn-secondary" id="clearResultsBtn">
-                                <i class="fas fa-trash"></i> 清空结果
-                            </button>
-                        </div>
-                        <div class="test-params">
-                            <div class="param-group">
-                                <label for="testTopK">返回数量:</label>
-                                <input type="number" id="testTopK" value="5" min="1" max="20" class="form-control">
-                            </div>
-                            <div class="param-group">
-                                <label for="testSimilarity">相似度阈值:</label>
-                                <input type="range" id="testSimilarity" min="0" max="1" step="0.01" value="0.5" class="form-control">
-                                <span class="similarity-value">0.50</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="test-results" id="testResults">
-                        <!-- 检索结果将在这里显示 -->
-                    </div>
-                </div>
-
-                <!-- 默认欢迎界面 -->
-                <div class="welcome-panel" id="welcomePanel">
-                    <div class="welcome-content">
-                        <div class="welcome-icon">
-                            <i class="fas fa-database"></i>
-                        </div>
-                        <h3>知识库管理</h3>
-                        <p>管理您的文档和知识库，进行知识检索测试</p>
-                        <div class="quick-actions">
-                            <button class="quick-btn" onclick="app.showNewKnowledgeBaseModal()">
-                                <i class="fas fa-plus"></i> 创建知识库
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-        </div>
-    </div>
-    
-    <!-- 模态框 -->
-    <!-- 新建知识库模态框 -->
-    <div id="newKnowledgeBaseModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>新建知识库</h3>
-                <span class="close" onclick="app.hideNewKnowledgeBaseModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="kbGroupName">知识库名称 *</label>
-                    <input type="text" id="kbGroupName" placeholder="请输入知识库名称" required>
-                </div>
-                <div class="form-group">
-                    <label for="kbDescription">描述（可选）</label>
-                    <textarea id="kbDescription" placeholder="请输入知识库描述" rows="3"></textarea>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" id="cancelNewKbBtn">取消</button>
-                <button type="button" class="btn btn-primary" id="createKbBtn">创建</button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- 知识库检索测试模态框 -->
-    
-    <!-- 文档上传模态框 -->
-    <div id="uploadModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3><i class="fas fa-upload"></i> 上传文档</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="upload-area" id="uploadArea">
-                    <div class="upload-icon">
-                        <i class="fas fa-cloud-upload-alt"></i>
-                    </div>
-                    <p>拖拽文件到此处或点击选择文件</p>
-                    <p class="upload-hint">支持 PDF, DOC, DOCX, TXT, MD 等格式</p>
-                    <input type="file" id="fileInput" multiple accept=".pdf,.doc,.docx,.txt,.md,.ppt,.pptx">
-                </div>
-                <div class="knowledge-base-select">
-                    <label for="kbSelect">选择知识库:</label>
-                    <select id="kbSelect">
-                        <option value="1">默认知识库</option>
-                    </select>
-                </div>
-                <div id="uploadProgress" class="upload-progress" style="display: none;">
-                    <div class="progress-bar">
-                        <div class="progress-fill"></div>
-                    </div>
-                    <div class="progress-text">上传中...</div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button id="cancelUploadBtn" class="btn-secondary">取消</button>
-                <button id="confirmUploadBtn" class="btn-primary">上传</button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- 文本上传模态框 -->
-    <div id="addTextModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3><i class="fas fa-plus"></i> 添加文本内容</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="textTitle">标题 *</label>
-                    <input type="text" id="textTitle" placeholder="请输入文档标题" required>
-                </div>
-                <div class="form-group">
-                    <label for="textContent">内容 *</label>
-                    <textarea id="textContent" rows="10" placeholder="请输入文档内容" required></textarea>
-                </div>
-                <div class="form-group">
-                    <label for="textSourceUrl">来源URL</label>
-                    <input type="url" id="textSourceUrl" placeholder="请输入文档来源URL（可选）">
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button id="cancelTextBtn" class="btn-secondary">取消</button>
-                <button id="confirmTextBtn" class="btn-primary">添加</button>
             </div>
         </div>
     </div>
 
-    <!-- 设置模态框 -->
-    <div id="settingsModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3><i class="fas fa-cog"></i> 设置</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="setting-group">
-                    <h4>聊天设置</h4>
-                    <div class="setting-item">
-                        <label for="maxTokens">最大回复长度:</label>
-                        <input type="number" id="maxTokens" value="2000" min="100" max="4000">
-                    </div>
-                    <div class="setting-item">
-                        <label for="temperature">创造性 (0-1):</label>
-                        <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.7">
-                        <span id="temperatureValue">0.7</span>
-                    </div>
-                </div>
-                <div class="setting-group">
-                    <h4>搜索设置</h4>
-                    <div class="setting-item">
-                        <label for="searchTopK">搜索结果数量:</label>
-                        <input type="number" id="searchTopK" value="5" min="1" max="20">
-                    </div>
-                    <div class="setting-item">
-                        <label for="similarityThreshold">相似度阈值:</label>
-                        <input type="range" id="similarityThreshold" min="0" max="1" step="0.05" value="0.7">
-                        <span id="similarityValue">0.7</span>
-                    </div>
+    <!-- 知识库管理区域 - 默认隐藏 -->
+    <div class="knowledge-container" id="knowledgeContainer" style="display: none;">
+        <!-- 文档管理区域 -->
+        <div class="document-panel" id="documentPanel">
+            <div class="panel-header">
+                <h3><i class="fas fa-folder-open"></i> 文档管理</h3>
+                <div class="panel-actions">
+                    <button class="btn btn-primary" id="uploadDocBtn">
+                        <i class="fas fa-upload"></i> 上传文档
+                    </button>
+                    <button class="btn btn-secondary" id="addTextBtn">
+                        <i class="fas fa-plus"></i> 添加文本
+                    </button>
+                    <button class="btn btn-secondary" id="refreshDocsBtn">
+                        <i class="fas fa-sync-alt"></i> 刷新
+                    </button>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button id="resetSettingsBtn" class="btn-secondary">重置</button>
-                <button id="saveSettingsBtn" class="btn-primary">保存</button>
+            <div class="document-list" id="documentList">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+
+        <!-- 知识召回检测区域 -->
+        <div class="knowledge-test-panel">
+            <div class="panel-header">
+                <h3><i class="fas fa-search"></i> 知识召回检测</h3>
+            </div>
+            <div class="test-controls">
+                <div class="input-group">
+                    <input type="text" id="testQuery" placeholder="输入测试查询..." class="form-control">
+                    <button class="btn btn-primary" id="runTestBtn">
+                        <i class="fas fa-play"></i> 检索
+                    </button>
+                    <button class="btn btn-secondary" id="clearResultsBtn">
+                        <i class="fas fa-trash"></i> 清空结果
+                    </button>
+                </div>
+                <div class="test-params">
+                    <div class="param-group">
+                        <label for="testTopK">返回数量:</label>
+                        <input type="number" id="testTopK" value="5" min="1" max="20" class="form-control">
+                    </div>
+                    <div class="param-group">
+                        <label for="testSimilarity">相似度阈值:</label>
+                        <input type="range" id="testSimilarity" min="0" max="1" step="0.01" value="0.5" class="form-control">
+                        <span class="similarity-value">0.50</span>
+                    </div>
+                </div>
+            </div>
+            <div class="test-results" id="testResults">
+                <!-- 检索结果将在这里显示 -->
+            </div>
+        </div>
+
+        <!-- 默认欢迎界面 -->
+        <div class="welcome-panel" id="welcomePanel">
+            <div class="welcome-content">
+                <div class="welcome-icon">
+                    <i class="fas fa-database"></i>
+                </div>
+                <h3>知识库管理</h3>
+                <p>管理您的文档和知识库，进行知识检索测试</p>
+                <div class="quick-actions">
+                    <button class="quick-btn" onclick="app.showNewKnowledgeBaseModal()">
+                        <i class="fas fa-plus"></i> 创建知识库
+                    </button>
+                </div>
             </div>
         </div>
     </div>
-    
-    <!-- 加载指示器 -->
-    <div id="loadingIndicator" class="loading-indicator" style="display: none;">
-        <div class="spinner"></div>
-        <span>处理中...</span>
+</div>
+
+<!-- 新建知识库模态框 -->
+<div id="newKnowledgeBaseModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>新建知识库</h3>
+            <span class="close" onclick="app.hideNewKnowledgeBaseModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="kbGroupName">知识库名称 *</label>
+                <input type="text" id="kbGroupName" placeholder="请输入知识库名称" required>
+            </div>
+            <div class="form-group">
+                <label for="kbDescription">描述（可选）</label>
+                <textarea id="kbDescription" placeholder="请输入知识库描述" rows="3"></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" id="cancelNewKbBtn">取消</button>
+            <button type="button" class="btn btn-primary" id="createKbBtn">创建</button>
+        </div>
     </div>
-    
-    <!-- Toast 通知 -->
-    <div id="toast" class="toast"></div>
-    
-    <script src="/static/js/app.js"></script>
-</body>
-</html>
+</div>
+
+<!-- 引入公共模态框 -->
+{% include "modals/common_modals.html" %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/app.js"></script>
+<script src="/static/js/chat.js"></script>
+<script src="/static/js/knowledge.js"></script>
+{% endblock %}

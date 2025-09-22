@@ -77,6 +77,7 @@ body {
     display: flex;
     flex-direction: column;
     border-right: 1px solid #34495e;
+    flex-shrink: 0; /* 防止侧边栏被压缩 */
 }
 
 .sidebar-header {
@@ -105,14 +106,48 @@ body {
     transform: scale(1.02);
 }
 
-.sidebar-header i {
-    color: #3498db;
-}
-
-/* 会话区域 */
+/* 侧边栏各个部分 */
 .sessions-section, .knowledge-section, .status-section {
     padding: 15px;
     border-bottom: 1px solid #34495e;
+    margin-bottom: 20px;
+    flex-shrink: 0;
+}
+
+/* 知识库容器样式 - 修复宽度问题 */
+.knowledge-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    padding: 20px;
+    gap: 20px;
+    overflow-y: auto;
+    background: #fafafa;
+}
+
+/* 文档管理面板和知识召回检测面板的布局 */
+.knowledge-container .document-panel,
+.knowledge-container .knowledge-test-panel {
+    flex: 1;
+    min-height: 0; /* 允许flex子项收缩 */
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+/* 欢迎面板样式 */
+.knowledge-container .welcome-panel {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .section-header {
@@ -796,23 +831,29 @@ body {
     color: rgba(255, 255, 255, 0.8);
 }
 
+/* 消息来源样式 - 统一样式 */
 .message-sources {
     margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px solid #ecf0f1;
+    padding: 10px;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    font-size: 14px;
 }
 
 .source-item {
-    font-size: 0.8rem;
-    color: #7f8c8d;
+    font-size: 14px;
+    color: #495057;
     margin-bottom: 4px;
     display: flex;
     align-items: center;
     gap: 6px;
+    padding: 4px 0;
 }
 
 .source-item i {
-    color: #3498db;
+    color: #1976d2;
+    font-size: 14px;
 }
 
 /* 输入区域 */
@@ -1452,17 +1493,31 @@ body {
 /* Toast 通知 */
 .toast {
     position: fixed;
-    bottom: 30px;
-    right: 30px;
+    top: 20px;   /* 统一到右上角 */
+    right: 20px;
+
     background: #2c3e50;
     color: white;
-    padding: 15px 20px;
-    border-radius: 8px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+    padding: 8px 12px;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+
     transform: translateX(400px);
     transition: transform 0.3s ease;
     z-index: 1500;
     max-width: 300px;
+
+    font-size: 14px;
+    line-height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: 48px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .toast.show {
@@ -1803,11 +1858,11 @@ body {
 
 @keyframes typingAnimation {
     0%, 60%, 100% {
-        transform: translateY(0);
+        transform: rotate(0);
         opacity: 0.4;
     }
     30% {
-        transform: translateY(-10px);
+        transform: rotate(-10px);
         opacity: 1;
     }
 }
@@ -2036,6 +2091,15 @@ body {
     font-size: 14px;
     line-height: 1.5;
     border-top: 1px solid #e9ecef;
+}
+
+/* 思考过程文本样式 - 与thinking-content保持一致 */
+.thinking-text {
+    color: #495057;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 /* 实时思考过程样式 - 与历史记录保持一致 */

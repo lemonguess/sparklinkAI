@@ -137,16 +137,26 @@ async def global_exception_handler(request: Request, exc: Exception):
 # 挂载静态文件
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# 注册路由
+# 路由配置
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["聊天"])
 app.include_router(knowledge_base.router, prefix="/api/v1/kb", tags=["知识库"])
 app.include_router(system.router, prefix="/api/v1/system", tags=["系统"])
 
-# 前端页面路由
+# 页面路由
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """主页面"""
     return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_page(request: Request):
+    """聊天页面"""
+    return templates.TemplateResponse("chat.html", {"request": request})
+
+@app.get("/knowledge", response_class=HTMLResponse)
+async def knowledge_page(request: Request):
+    """知识库管理页面"""
+    return templates.TemplateResponse("knowledge.html", {"request": request})
 
 # API根路径
 @app.get("/api", response_model=BaseResponse)

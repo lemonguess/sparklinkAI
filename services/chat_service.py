@@ -40,6 +40,8 @@ class ChatService:
         strategy: SearchStrategy = SearchStrategy.AUTO,
         kg_max_results: int = 5,
         web_max_results: int = 10,
+        similarity_threshold: float = settings.knowledge_confidence_threshold,
+        group_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """智能搜索 - 整合知识库和网络搜索"""
         logger.info(f"🚀 开始智能搜索: {query}")
@@ -53,7 +55,9 @@ class ChatService:
                 logger.info("🔍 执行知识库搜索")
                 knowledge_results = await self.knowledge_service.knowledge_search(
                     query=query,
-                    top_k=kg_max_results
+                    group_id=group_id,
+                    top_k=kg_max_results,
+                    similarity_threshold=similarity_threshold,
                 )
             # 第三步：判断是否需要网络搜索
             if strategy == SearchStrategy.WEB_ONLY:

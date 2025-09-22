@@ -90,7 +90,7 @@ def create_default_kb_groups():
     """为所有用户创建默认知识库分组
     
     轮询每个用户，检查是否有 kb_groups 数据，
-    如果没有，则创建一个名为"默认知识库"的分组。
+    如果没有，则创建一个名为"默认知识库"的分组，使用配置文件中的确定ID。
     
     Returns:
         bool: 创建成功返回True，失败返回False
@@ -111,14 +111,15 @@ def create_default_kb_groups():
             # 如果没有知识库分组，创建默认分组
             if existing_groups == 0:
                 default_group = KbGroup(
+                    id=settings.default_kb_group_id,
                     user_id=user.id,
-                    group_name="默认知识库",
-                    description="系统自动创建的默认知识库分组",
+                    group_name=settings.default_kb_group_name,
+                    description=settings.default_kb_group_description,
                     is_active=True
                 )
                 
                 session.add(default_group)
-                logger.info(f"为用户 {user.username} (ID: {user.id}) 创建默认知识库分组")
+                logger.info(f"为用户 {user.username} (ID: {user.id}) 创建默认知识库分组 (ID: {settings.default_kb_group_id})")
         
         session.commit()
         logger.info("默认知识库分组创建完成")
