@@ -410,41 +410,33 @@ class VectorService:
         collection_name: str,
         query_embedding: List[float],
         top_k: int = 10,
-        similarity_threshold: float = None,
+        similarity_threshold: float = settings.similarity_threshold,
         user_id: str = None,
         group_id: str = None,
     ) -> List[Dict[str, Any]]:
         """搜索向量（异步）"""
-        # 如果没有提供相似度阈值，使用配置文件中的默认值
-        if similarity_threshold is None:
-            similarity_threshold = settings.similarity_threshold
-            
+        # 如果没有提供相似度阈值，使用配置文件中的默认值           
         if not self._connected:
-            await self.connect()
-        
+            await self.connect()  
         if not MILVUS_AVAILABLE or not self._connected:
             logger.error("Milvus未连接")
             return []
-        
         try:
             # 获取集合
             if collection_name not in self._collections:
                 if not utility.has_collection(collection_name):
                     logger.warning(f"集合不存在: {collection_name}")
                     return []
-                
                 collection = Collection(collection_name)
                 collection.load()
                 self._collections[collection_name] = collection
             else:
                 collection = self._collections[collection_name]
-            
             # 搜索参数
             search_params = {
                 "metric_type": "IP",
                 "params": {"nprobe": 10}
             }
-            
             # 构建过滤表达式
             filter_conditions = []
             if user_id:
@@ -463,18 +455,14 @@ class VectorService:
                 expr=filter_expr,  # 添加用户和分组过滤
                 output_fields=["doc_id", "doc_name", "source_path", "create_at", "update_at", "chunk_content", "doc_type", "user_id", "group_id"]
             )
-            
             # 处理结果
             search_results = []
-            
             for hits in results:
                 for hit in hits:
                     score = float(hit.score)
-                    
                     # 过滤低相似度结果
                     if score < similarity_threshold:
                         continue
-                    
                     result = {
                         "id": hit.id,
                         "score": score,
@@ -488,16 +476,11 @@ class VectorService:
                         "user_id": hit.entity.get("user_id", ""),
                         "group_id": hit.entity.get("group_id", None)
                     }
-                    
                     search_results.append(result)
-            
             # 按相似度排序
             search_results.sort(key=lambda x: x["score"], reverse=True)
-            
             logger.debug(f"向量搜索完成: {collection_name}, 找到 {len(search_results)} 个结果")
-            
             return search_results
-            
         except Exception as e:
             logger.error(f"向量搜索失败: {e}")
             return []

@@ -394,22 +394,16 @@ class SearchService:
         self,
         query: str,
         top_k: int = 10,
-        similarity_threshold: float = None,
-        collection_name: Optional[str] = None,
+        similarity_threshold: float = settings.similarity_threshold,
+        collection_name: Optional[str] = settings.MILVUS_COLLECTION_NAME,
         group_id: Optional[str] = None,
         user_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """知识库搜索"""
         try:
-            # 如果没有提供相似度阈值，使用配置文件中的默认值
-            if similarity_threshold is None:
-                similarity_threshold = settings.similarity_threshold
-                
             # 生成查询向量
             query_embedding = await self.embedding_service.generate_embedding(query)
-            
             # 向量搜索
-            collection_name = collection_name or "sparklinkai_knowledge"
             results = await self.vector_service.search_vectors_async(
                 collection_name=collection_name,
                 query_embedding=query_embedding,

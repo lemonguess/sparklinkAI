@@ -1,7 +1,7 @@
 """用户相关工具函数"""
 import logging
 from core.config import settings
-from core.database import db_manager
+from core import db_manager
 from models.database import User, KbGroup
 
 logger = logging.getLogger(__name__)

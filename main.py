@@ -9,7 +9,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from core.config import settings
-from core.database import db_manager
+from core import db_manager
 from api import chat, knowledge_base, system
 from models.schemas import BaseResponse
 from utils.user_utils import create_default_user, ensure_default_kb_groups

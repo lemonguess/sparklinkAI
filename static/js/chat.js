@@ -66,6 +66,14 @@ class ChatManager {
 
         // 消息操作按钮委托事件
         Utils.DOM.on('#chatMessages', 'click', (e) => {
+            // 折叠交互统一由 app.js 处理，这里仅拦截避免重复逻辑
+            const headerEl = e.target.closest('.collapsible-header');
+            if (headerEl) {
+                // 不做处理，交由 app.js 的委托事件切换 expanded 与显示状态
+                return; // 防止与其他按钮事件冲突
+            }
+
+            // 原有消息操作按钮
             if (e.target.classList.contains('message-action-btn')) {
                 const action = e.target.dataset.action;
                 const messageId = e.target.closest('.message').dataset.messageId;
@@ -120,7 +128,7 @@ class ChatManager {
 
             // 添加助手回复
             if (response.success) {
-                this.addMessage('assistant', response.message, response.message_id);
+                this.addMessage('assistant', response.message, response.message_id, response.sources || null, response.thinking_process || null);
                 this.currentSessionId = response.session_id;
                 this.updateSessionsList();
             } else {
@@ -138,8 +146,10 @@ class ChatManager {
      * @param {string} role - 角色 (user/assistant)
      * @param {string} content - 消息内容
      * @param {string} messageId - 消息ID
+     * @param {object|null} sources - 资源来源信息 { knowledge_sources: [], web_search_results: [] }
+     * @param {string|null} thinkingProcess - 思考过程原始文本
      */
-    addMessage(role, content, messageId = null) {
+    addMessage(role, content, messageId = null, sources = null, thinkingProcess = null) {
         const messagesContainer = Utils.DOM.get('#chatMessages');
         if (!messagesContainer) {
             console.error('Messages container not found');
@@ -157,23 +167,61 @@ class ChatManager {
             className: 'message-avatar'
         }, role === 'user' ? 'U' : 'AI');
 
-        const contentElement = Utils.DOM.create('div', {
+        const contentWrapper = Utils.DOM.create('div', {
             className: 'message-content'
         });
 
-        // 处理消息内容（支持Markdown）
-        contentElement.innerHTML = this.formatMessageContent(content);
+        // 在文本内容前插入：资源来源（默认折叠）和思考过程（默认折叠）
+        if (role === 'assistant') {
+            // 资源来源容器（默认折叠，点击标题区域切换）
+            if (sources && ((sources.knowledge_sources && sources.knowledge_sources.length > 0) || (sources.web_search_results && sources.web_search_results.length > 0))) {
+                const sourceContainer = Utils.DOM.create('div', { className: 'collapsible-container source-container' });
+                const sourceHeader = Utils.DOM.create('div', { className: 'collapsible-header' }, '资源来源');
+                const sourceContent = Utils.DOM.create('div', { className: 'collapsible-content' });
+                sourceContent.style.display = 'block';
+
+                let sourcesHtml = '';
+                if (sources.knowledge_sources && sources.knowledge_sources.length > 0) {
+                    sourcesHtml += sources.knowledge_sources.map(s => `<div class="source-item"><i class="fas fa-database"></i> ${Utils.String.escapeHtml(s.title || '知识库')}</div>`).join('');
+                }
+                if (sources.web_search_results && sources.web_search_results.length > 0) {
+                    sourcesHtml += sources.web_search_results.map(s => `<div class="source-item"><i class="fas fa-globe"></i> ${Utils.String.escapeHtml(s.title || '网络搜索')}</div>`).join('');
+                }
+                sourceContent.innerHTML = sourcesHtml;
+                sourceContainer.appendChild(sourceHeader);
+                sourceContainer.appendChild(sourceContent);
+                contentWrapper.appendChild(sourceContainer);
+            }
+
+            // 思考过程容器（默认折叠，点击标题区域切换）
+            if (thinkingProcess) {
+                const thinkContainer = Utils.DOM.create('div', { className: 'collapsible-container thinking-container' });
+                const thinkHeader = Utils.DOM.create('div', { className: 'collapsible-header' }, '思考过程');
+                const thinkContent = Utils.DOM.create('div', { className: 'collapsible-content' });
+                thinkContent.style.display = 'block';
+                thinkContent.innerHTML = this.formatMessageContent(thinkingProcess);
+                thinkContainer.appendChild(thinkHeader);
+                thinkContainer.appendChild(thinkContent);
+                contentWrapper.appendChild(thinkContainer);
+            }
+        }
+
+        // 消息文本内容
+        const textElement = Utils.DOM.create('div', {
+            className: 'message-text'
+        });
+        textElement.innerHTML = this.formatMessageContent(content);
 
         const timeElement = Utils.DOM.create('div', {
             className: 'message-time'
         }, Utils.String.formatTime(new Date()));
 
-        const actionsElement = Utils.DOM.create('div', {
-            className: 'message-actions'
-        });
-
         // 添加消息操作按钮
         if (role === 'assistant') {
+            const actionsElement = Utils.DOM.create('div', {
+                className: 'message-actions'
+            });
+            
             actionsElement.appendChild(Utils.DOM.create('button', {
                 className: 'message-action-btn',
                 'data-action': 'copy'
@@ -183,12 +231,17 @@ class ChatManager {
                 className: 'message-action-btn',
                 'data-action': 'regenerate'
             }, '重新生成'));
+            
+            contentWrapper.appendChild(textElement);
+            contentWrapper.appendChild(timeElement);
+            contentWrapper.appendChild(actionsElement);
+        } else {
+            contentWrapper.appendChild(textElement);
+            contentWrapper.appendChild(timeElement);
         }
 
         messageElement.appendChild(avatar);
-        messageElement.appendChild(contentElement);
-        contentElement.appendChild(timeElement);
-        contentElement.appendChild(actionsElement);
+        messageElement.appendChild(contentWrapper);
 
         messagesContainer.appendChild(messageElement);
         

@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 from core.config import settings
 from core.database import get_db
-from core.shared_state import active_streams
+from core import active_streams
 from models.database import ChatMessage as DBChatMessage
 from services.search_service import SearchService
 from models.enums import SearchStrategy
@@ -142,7 +142,7 @@ class ChatService:
             
             # 添加历史对话（最近10轮）
             if conversation_history:
-                messages.extend(conversation_history[-20:])  # 最近20条消息（10轮对话）
+                messages.extend(conversation_history[-settings.conversation_history_limit:])  # 最近20条消息（10轮对话）
             
             # 添加当前用户消息
             messages.append({"role": "user", "content": message})
@@ -164,6 +164,8 @@ class ChatService:
         web_search_results: List = None,
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
+        max_tokens: Optional[int] = settings.max_tokens,
+        temperature: Optional[float] = settings.temperature,
     ) -> AsyncGenerator[str, None]:
         """生成流式聊天回复"""
         try:           
@@ -182,7 +184,7 @@ class ChatService:
             ]
             
             if conversation_history:
-                messages.extend(conversation_history[-20:])
+                messages.extend(conversation_history[-settings.conversation_history_limit:])
             
             messages.append({"role": "user", "content": message})
             
@@ -191,8 +193,8 @@ class ChatService:
                 response = await self.client.chat.completions.create(
                     model=settings.chat_model,
                     messages=messages,
-                    max_tokens=settings.max_tokens,
-                    temperature=settings.temperature,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
                     stream=True
                 )
                 
@@ -233,9 +235,7 @@ class ChatService:
                 max_tokens=settings.max_tokens,
                 temperature=settings.temperature
             )
-            
             return response.choices[0].message.content.strip()
-            
         except Exception as e:
             logger.error(f"调用LLM失败: {e}")
             raise
@@ -253,21 +253,32 @@ class ChatService:
         # 添加知识库信息
         if knowledge_sources:
             base_prompt += "\n\n**相关知识库内容：**\n"
-            for i, source in enumerate(knowledge_sources, 1):  # 最多5个来源
-                content = source.get('content', '').strip()
-                score = source.get('score', 0)
-                base_prompt += f"{i}. [相似度: {score:.2f}] {content}\n"
+            context_parts = []
+            for i, source in enumerate(knowledge_sources, 1):
+                context_parts.append(
+                    f"[知识库片段{i}]\n"
+                    f"标题: {source['title']}\n"
+                    f"内容: {source['content']}\n"
+                    f"来源: {source['source_path'] if source['doc_type'] != 'file' else '暂无'}\n"
+                )
+            context_text = "\n".join(context_parts)
+            base_prompt += context_text
         
         # 添加搜索结果
         if web_search_results:
-            base_prompt += "\n\n**相关搜索结果：**\n"
-            for i, result in enumerate(web_search_results, 1):  # 最多3个搜索结果
-                title = result.get('title', '').strip()
-                content = result.get('content', '').strip()
-                url = result.get('url', '')
-                base_prompt += f"{i}. **{title}**\n{content}\n来源: {url}\n\n"
+            context_parts = []
+            base_prompt += "\n\n**相关联网搜索结果：**\n"
+            for i, result in enumerate(web_search_results, 1):
+                context_parts.append(
+                    f"[网络搜索结果{i}]\n"
+                    f"标题: {result['title']}\n"
+                    f"内容: {result['content']}\n"
+                    f"来源: {result['url']}\n"
+                )
+            context_text = "\n".join(context_parts)
+            base_prompt += context_text
         
-        return base_prompt
+        return base_prompt.strip()
     
     async def _get_conversation_history(self, session_id: Optional[str]) -> List[Dict[str, str]]:
         """获取会话的对话历史（仅从MySQL获取）"""

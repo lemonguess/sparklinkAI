@@ -2,12 +2,10 @@
 import redis
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import StaticPool
 from typing import Generator
 
 from core.config import settings
 from models.database import Base
-
 # MySQL数据库引擎
 engine = create_engine(
     settings.database_url,
@@ -82,6 +80,3 @@ class DatabaseManager:
         except Exception as e:
             print(f"Redis连接测试失败: {e}")
             return False
-
-# 全局数据库管理器实例
-db_manager = DatabaseManager()

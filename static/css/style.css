@@ -831,16 +831,7 @@ body {
     color: rgba(255, 255, 255, 0.8);
 }
 
-/* 消息来源样式 - 统一样式 */
-.message-sources {
-    margin-top: 10px;
-    padding: 10px;
-    background: #f8f9fa;
-    border: 1px solid #e9ecef;
-    border-radius: 8px;
-    font-size: 14px;
-}
-
+/* 消息来源样式 - 统一样式，去掉外层包装 */
 .source-item {
     font-size: 14px;
     color: #495057;
@@ -2040,6 +2031,54 @@ body {
     border-radius: 8px;
     margin: 10px 0;
     overflow: hidden;
+}
+
+/* 通用折叠头部样式（思考过程/信息来源） */
+.collapsible-header {
+    background: #f8f9fa;
+    padding: 12px 14px; /* 更大点击区域 */
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px; /* 图标紧邻文字 */
+    user-select: none;
+    line-height: 1.2;
+    transition: background-color 0.2s ease;
+}
+
+.collapsible-header:hover {
+    background: #e9ecef;
+}
+
+.collapsible-header h4 {
+    margin: 0;
+    font-size: 1rem; /* 标题更大 */
+    font-weight: 600;
+    color: #2c3e50; /* 美化文字颜色 */
+    letter-spacing: 0.2px; /* 略微增加字距 */
+}
+
+/* 放大折叠头部中的图标，靠近文字 */
+.collapsible-header .toggle-icon {
+    font-size: 1rem;
+    line-height: 1;
+}
+
+/* 展开态视觉反馈 */
+.collapsible.expanded .collapsible-header {
+    background: #f1f3f5;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+/* 折叠内容显隐规则（用于 .collapsible-content） */
+.collapsible .collapsible-content {
+    display: none;
+    padding: 12px;
+    background: #fff;
+}
+
+.collapsible.expanded .collapsible-content {
+    display: block;
 }
 
 .thinking-header {

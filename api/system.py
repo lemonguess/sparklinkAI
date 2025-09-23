@@ -6,10 +6,11 @@ import time
 import psutil
 import logging
 
-from core.database import get_db, db_manager
+from core.database import get_db
+from core import db_manager
 from core.config import settings
 from models.schemas import BaseResponse, SystemStatus, ModelConfig, KnowledgeBaseConfig, SearchConfig
-from models.database import ChatSession, KbDocument
+from models.database import ChatSession
 from services.vector_service import VectorService
 
 router = APIRouter()

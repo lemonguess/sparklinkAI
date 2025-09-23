@@ -29,11 +29,18 @@ class SparkLinkApp {
         if (thinkContainer) {
             // 显示思考容器
             thinkContainer.style.display = 'block';
+
+            // 确保折叠内容区域可见
+            const contentEl = thinkContainer.querySelector('.collapsible-content');
+            if (contentEl) {
+                contentEl.style.display = 'block';
+            }
+            // 设置展开状态，配合 .collapsible.expanded 样式
+            thinkContainer.classList.add('expanded');
             
-            // 获取思考文本容器
+            // 获取思考文本容器并追加内容
             const thinkingText = thinkContainer.querySelector('.thinking-text');
             if (thinkingText) {
-                // 添加思考内容
                 const currentContent = thinkingText.textContent || '';
                 thinkingText.textContent = currentContent + thinkContent;
             }
@@ -42,38 +49,61 @@ class SparkLinkApp {
     }
     
     updateSourceContent(messageElement, sourceData) {
-        const sourceContainer = messageElement.querySelector('.message-source');
-        if (sourceContainer && sourceData) {
-            sourceContainer.style.display = 'block';
-            
-            let sourceHtml = '<div class="source-info collapsible"><div class="source-header" onclick="this.parentElement.classList.toggle(\'expanded\')"><h4>🔍 信息来源</h4><span class="toggle-icon">▼</span></div><div class="source-content">';
-            
-            // 显示决策推理
-            if (sourceData.decision_reasoning) {
-                sourceHtml += `<div class="decision-reasoning"><strong>搜索策略:</strong> ${sourceData.decision_reasoning}</div>`;
-            }
-            
-            // 显示知识库结果
-            if (sourceData.knowledge_results && sourceData.knowledge_results.length > 0) {
-                sourceHtml += '<div class="knowledge-results collapsible"><div class="subsection-header" onclick="this.parentElement.classList.toggle(\'expanded\')"><strong>📚 知识库结果</strong><span class="toggle-icon">▼</span></div><div class="subsection-content"><ul>';
-                sourceData.knowledge_results.forEach(result => {
-                    sourceHtml += `<li>${result.title || result.content}</li>`;
-                });
-                sourceHtml += '</ul></div></div>';
-            }
-            
-            // 显示网络搜索结果
-            if (sourceData.web_results && sourceData.web_results.length > 0) {
-                sourceHtml += '<div class="web-results collapsible"><div class="subsection-header" onclick="this.parentElement.classList.toggle(\'expanded\')"><strong>🌐 网络搜索结果</strong><span class="toggle-icon">▼</span></div><div class="subsection-content"><ul>';
-                sourceData.web_results.forEach(result => {
-                    sourceHtml += `<li><a href="${result.url}" target="_blank">${result.title}</a></li>`;
-                });
-                sourceHtml += '</ul></div></div>';
-            }
-            
-            sourceHtml += '</div></div>';
-            sourceContainer.innerHTML = sourceHtml;
+        if (!sourceData) return;
+
+        let itemsHtml = '';
+        const knowledge = sourceData.knowledge_sources || sourceData.knowledge_results || [];
+        const web = sourceData.web_search_results || sourceData.web_results || [];
+
+        if (Array.isArray(knowledge) && knowledge.length > 0) {
+            itemsHtml += knowledge.map(item => {
+                const title = item.title || item.content || '知识库';
+                const rawUrl = item.source_path || item.url || '';
+                const url = (typeof rawUrl === 'string') ? rawUrl.replace(/[\s`]/g, '') : '';
+                return url
+                    ? `<div class=\"source-item\"><i class=\"fas fa-database\"></i> <a href=\"${url}\" target=\"_blank\" rel=\"noopener noreferrer\">${title}</a></div>`
+                    : `<div class=\"source-item\"><i class=\"fas fa-database\"></i> ${title}</div>`;
+            }).join('');
         }
+
+        if (Array.isArray(web) && web.length > 0) {
+            itemsHtml += web.map(item => {
+                const title = item.title || item.url || '网络搜索';
+                const rawUrl = item.source_path || item.url || '';
+                const url = (typeof rawUrl === 'string') ? rawUrl.replace(/[\s`]/g, '') : '';
+                return url
+                    ? `<div class=\"source-item\"><i class=\"fas fa-globe\"></i> <a href=\"${url}\" target=\"_blank\" rel=\"noopener noreferrer\">${title}</a></div>`
+                    : `<div class=\"source-item\"><i class=\"fas fa-globe\"></i> ${title}</div>`;
+            }).join('');
+        }
+
+        if (!itemsHtml && typeof sourceData === 'string') {
+            itemsHtml = `<div class="source-item">${sourceData}</div>`;
+        }
+
+        let sourcesContainer = messageElement.querySelector('.sources-container');
+        if (!sourcesContainer) {
+            sourcesContainer = document.createElement('div');
+            sourcesContainer.className = 'collapsible sources-container expanded';
+            sourcesContainer.innerHTML = `
+                <div class=\"collapsible-header\"><h4>信息来源</h4><span class=\"toggle-icon\">▼</span></div>
+                <div class=\"collapsible-content\"></div>
+            `;
+            const messageContent = messageElement.querySelector('.message-content');
+            const messageTime = messageElement.querySelector('.message-time');
+            if (messageContent) {
+                messageContent.insertBefore(sourcesContainer, messageTime || null);
+            }
+        }
+
+        const contentEl = sourcesContainer.querySelector('.collapsible-content');
+        if (contentEl && itemsHtml) {
+            contentEl.insertAdjacentHTML('beforeend', itemsHtml);
+            sourcesContainer.style.display = 'block';
+            contentEl.style.display = 'block';
+            sourcesContainer.classList.add('expanded');
+        }
+
         this.scrollToBottom();
     }
     
@@ -289,6 +319,25 @@ class SparkLinkApp {
         
         // 折叠展开功能
         this.bindCollapsibleEvents();
+
+        // 聊天消息区域折叠事件委托（与 chat.js 保持一致）
+        const messagesContainer = document.getElementById('chatMessages');
+        if (messagesContainer) {
+            messagesContainer.addEventListener('click', (e) => {
+                const headerEl = e.target.closest('.collapsible-header');
+                if (headerEl) {
+                    const container = headerEl.parentElement;
+                    const contentEl = container.querySelector('.collapsible-content');
+                    const isExpanded = container.classList.toggle('expanded');
+                    if (contentEl) {
+                        contentEl.style.display = isExpanded ? 'block' : 'none';
+                    }
+                    headerEl.classList.toggle('expanded', isExpanded);
+                    e.stopPropagation();
+                    return;
+                }
+            });
+        }
     }
     
     bindModalEvents() {
@@ -1470,42 +1519,51 @@ class SparkLinkApp {
         const avatar = role === 'user' ? '<i class="fas fa-user"></i>' : '<i class="fas fa-robot"></i>';
         const time = timestamp ? this.formatTime(timestamp) : this.formatTime(new Date().toISOString());
         
-        // 构建思考过程HTML
+        // 构建思考过程HTML（统一折叠容器）
         let thinkingHtml = '';
         if (thinkingProcess && role === 'assistant') {
             thinkingHtml = `
-                <div class="thinking-container" style="display: block;">
-                    <div class="thinking-header">
-                        <i class="fas fa-brain"></i>
-                        <span>思考过程</span>
-                        <button class="thinking-toggle" onclick="toggleThinking(this)">
-                            <i class="fas fa-chevron-up"></i>
-                        </button>
-                    </div>
-                    <div class="thinking-content" style="display: block;">
-                        ${this.formatMessageContent(thinkingProcess)}
+                <div class="collapsible thinking-container expanded">
+                    <div class="collapsible-header"><h4>思考过程</h4><span class="toggle-icon">▼</span></div>
+                    <div class="collapsible-content">
+                        <div class="thinking-text">${this.formatMessageContent(thinkingProcess)}</div>
                     </div>
                 </div>
             `;
         }
         
+        // 构建来源信息HTML（统一折叠容器）
         let sourcesHtml = '';
         if (sources && (sources.knowledge_sources?.length > 0 || sources.web_search_results?.length > 0)) {
-            sourcesHtml = '<div class="message-sources">';
-            
+            let items = '';
             if (sources.knowledge_sources?.length > 0) {
-                sourcesHtml += sources.knowledge_sources.map(source => 
-                    `<div class="source-item"><i class="fas fa-database"></i> ${source.title || '知识库'}</div>`
-                ).join('');
+                items += (sources.knowledge_sources || []).map(source => {
+                    const title = source.title || '知识库';
+                    const rawUrl = source.source_path || source.url || '';
+                    const url = (typeof rawUrl === 'string') ? rawUrl.replace(/[\s`]/g, '') : '';
+                    return url
+                        ? `<div class=\"source-item\"><i class=\"fas fa-database\"></i> <a href=\"${url}\" target=\"_blank\" rel=\"noopener noreferrer\">${title}</a></div>`
+                        : `<div class=\"source-item\"><i class=\"fas fa-database\"></i> ${title}</div>`;
+                }).join('');
             }
-            
             if (sources.web_search_results?.length > 0) {
-                sourcesHtml += sources.web_search_results.map(source => 
-                    `<div class="source-item"><i class="fas fa-globe"></i> ${source.title || '网络搜索'}</div>`
-                ).join('');
+                items += (sources.web_search_results || []).map(source => {
+                    const title = source.title || '网络搜索';
+                    const rawUrl = source.source_path || source.url || '';
+                    const url = (typeof rawUrl === 'string') ? rawUrl.replace(/[\s`]/g, '') : '';
+                    return url
+                        ? `<div class=\"source-item\"><i class=\"fas fa-globe\"></i> <a href=\"${url}\" target=\"_blank\" rel=\"noopener noreferrer\">${title}</a></div>`
+                        : `<div class=\"source-item\"><i class=\"fas fa-globe\"></i> ${title}</div>`;
+                }).join('');
             }
-            
-            sourcesHtml += '</div>';
+            if (items) {
+                sourcesHtml = `
+                    <div class=\"collapsible sources-container expanded\">
+                        <div class=\"collapsible-header\"><h4>信息来源</h4><span class=\"toggle-icon\">▼</span></div>
+                        <div class=\"collapsible-content\">${items}</div>
+                    </div>
+                `;
+            }
         }
         
         messageElement.innerHTML = `
@@ -1566,21 +1624,13 @@ class SparkLinkApp {
         messageElement.innerHTML = `
             <div class="message-avatar">${avatar}</div>
             <div class="message-content">
-                <div class="message-source" style="display: none;"></div>
-                <div class="thinking-container" style="display: none;">
-                    <div class="thinking-header">
-                        <i class="fas fa-brain"></i>
-                        <span>思考过程</span>
-                        <button class="thinking-toggle" onclick="toggleThinking(this)">
-                            <i class="fas fa-chevron-up"></i>
-                        </button>
-                    </div>
-                    <div class="thinking-content" style="display: block;">
+                <div class="collapsible thinking-container expanded">
+                    <div class="collapsible-header"><h4>思考过程</h4><span class="toggle-icon">▼</span></div>
+                    <div class="collapsible-content">
                         <div class="thinking-text"></div>
                     </div>
                 </div>
                 <div class="message-text"></div>
-                <div class="message-sources"></div>
                 <div class="message-time">${time}</div>
             </div>
         `;
@@ -1600,26 +1650,57 @@ class SparkLinkApp {
     }
     
     addSourcesToMessage(messageElement, sources) {
-        const sourcesContainer = messageElement.querySelector('.message-sources');
-        if (!sourcesContainer || (!sources.knowledge_sources?.length && !sources.web_search_results?.length)) {
+        if (!sources || (!sources.knowledge_sources?.length && !sources.web_search_results?.length)) {
             return;
         }
-        
-        let sourcesHtml = '';
-        
+
+        let items = '';
         if (sources.knowledge_sources?.length > 0) {
-            sourcesHtml += sources.knowledge_sources.map(source => 
-                `<div class="source-item"><i class="fas fa-database"></i> ${source.title || '知识库'}</div>`
-            ).join('');
+            items += (sources.knowledge_sources || []).map(source => {
+                const title = source.title || '知识库';
+                const rawUrl = source.source_path || source.url || '';
+                const url = (typeof rawUrl === 'string') ? rawUrl.replace(/[\s`]/g, '') : '';
+                return url
+                    ? `<div class=\"source-item\"><i class=\"fas fa-database\"></i> <a href=\"${url}\" target=\"_blank\" rel=\"noopener noreferrer\">${title}</a></div>`
+                    : `<div class=\"source-item\"><i class=\"fas fa-database\"></i> ${title}</div>`;
+            }).join('');
         }
-        
         if (sources.web_search_results?.length > 0) {
-            sourcesHtml += sources.web_search_results.map(source => 
-                `<div class="source-item"><i class="fas fa-globe"></i> ${source.title || '网络搜索'}</div>`
-            ).join('');
+            items += (sources.web_search_results || []).map(source => {
+                const title = source.title || '网络搜索';
+                const rawUrl = source.source_path || source.url || '';
+                const url = (typeof rawUrl === 'string') ? rawUrl.replace(/[\s`]/g, '') : '';
+                return url
+                    ? `<div class=\"source-item\"><i class=\"fas fa-globe\"></i> <a href=\"${url}\" target=\"_blank\" rel=\"noopener noreferrer\">${title}</a></div>`
+                    : `<div class=\"source-item\"><i class=\"fas fa-globe\"></i> ${title}</div>`;
+            }).join('');
         }
-        
-        sourcesContainer.innerHTML = sourcesHtml;
+
+        if (!items) return;
+
+        // 创建或查找来源容器并插入
+        let sourcesContainer = messageElement.querySelector('.sources-container');
+        if (!sourcesContainer) {
+            sourcesContainer = document.createElement('div');
+            sourcesContainer.className = 'collapsible sources-container expanded';
+            sourcesContainer.innerHTML = `
+                <div class=\"collapsible-header\"><h4>🔍 信息来源</h4><span class=\"toggle-icon\">▼</span></div>
+                <div class=\"collapsible-content\"></div>
+            `;
+            const messageContent = messageElement.querySelector('.message-content');
+            const messageTime = messageElement.querySelector('.message-time');
+            if (messageContent) {
+                messageContent.insertBefore(sourcesContainer, messageTime || null);
+            }
+        }
+
+        const contentEl = sourcesContainer.querySelector('.collapsible-content');
+        if (contentEl) {
+            contentEl.insertAdjacentHTML('beforeend', items);
+            sourcesContainer.style.display = 'block';
+            contentEl.style.display = 'block';
+            sourcesContainer.classList.add('expanded');
+        }
     }
     
     formatMessageContent(content) {
@@ -2454,18 +2535,13 @@ function sendQuickMessage(message) {
 
 // 思考过程折叠/展开函数
 function toggleThinking(button) {
-    const thinkingContainer = button.closest('.thinking-container');
-    const thinkingContent = thinkingContainer.querySelector('.thinking-content');
-    const icon = button.querySelector('i');
-    
-    if (thinkingContent.style.display === 'none') {
-        thinkingContent.style.display = 'block';
-        icon.className = 'fas fa-chevron-up';
-    } else {
-        thinkingContent.style.display = 'none';
-        icon.className = 'fas fa-chevron-down';
+    // 兼容旧内联按钮：触发其所在容器的 header 点击，由事件委托处理折叠
+    const headerEl = button.closest('.collapsible-container')?.querySelector('.collapsible-header');
+    if (headerEl) {
+        headerEl.click();
     }
 }
+
 
 // 初始化应用
 let app;

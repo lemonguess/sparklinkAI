@@ -5,8 +5,6 @@ from core.config import settings
 # 创建Celery应用
 celery_app = Celery(
     "sparklinkai",
-    broker=settings.celery_broker_url,
-    backend=settings.celery_result_backend,
     include=[
         "services.tasks.embedding_tasks"
     ]

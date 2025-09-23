@@ -22,7 +22,7 @@ from services.search_service import SearchService
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-from core.shared_state import active_streams
+from core import active_streams
 
 # 服务实例
 search_service = SearchService()
@@ -257,7 +257,6 @@ async def chat_stream(
                 db.refresh(new_session)
                 session_id = new_session.id
                 session = new_session
-                
                 # 发送会话信息给前端（使用临时标题）
                 yield f"data: {json.dumps({'type': 'session_info', 'session_id': session_id, 'session_name': '新会话'}, ensure_ascii=False)}\n\n"
             else:
@@ -285,7 +284,6 @@ async def chat_stream(
                     web_search_results=search_result['web_results'],
                     request_id=request_id,
                     session_id=session_id,
-                    is_first=request.is_first,
                     max_tokens=request.max_tokens,
                     temperature=request.temperature
                 ):
