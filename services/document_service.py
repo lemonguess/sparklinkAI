@@ -76,47 +76,112 @@ class DocumentService:
         try:
             logger.info(f"使用 MinerU API 解析文件: {file_path}")
             
-            # 如果没有 API 密钥，尝试使用免费额度
-            if not self.mineru_api_key:
-                logger.warning("未设置 MinerU API 密钥，将使用免费额度（如果可用）")
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"文件不存在: {file_path}")
             
-            # 由于 MinerU 的在线 API 需要申请和认证，这里先实现一个简化版本
-            # 实际使用时需要根据官方文档完善 API 调用
+            # 准备文件上传 - 使用 files 数组格式
+            with open(file_path, 'rb') as f:
+                files = {
+                    'files': (os.path.basename(file_path), f, 'application/octet-stream')
+                }
+                
+                # 准备请求数据，包含 MinerU API 的参数
+                data = {
+                    'output_dir': './output',
+                    'lang_list': ['ch'],  # 中文
+                    'backend': 'pipeline',
+                    'parse_method': 'auto',
+                    'formula_enable': True,
+                    'table_enable': True,
+                    'return_md': True,
+                    'return_middle_json': False,
+                    'return_model_output': False,
+                    'return_content_list': False,
+                    'return_images': False,
+                    'response_format_zip': False,
+                    'start_page_id': 0,
+                    'end_page_id': 99999
+                }
+                
+                # 发送 POST 请求到本地 MinerU 服务
+                response = requests.post(
+                    self.mineru_api_url,
+                    files=files,
+                    data=data,
+                    timeout=120  # 120秒超时，文档解析可能需要较长时间
+                )
             
-            # 暂时返回提示信息，表明需要配置 API
-            logger.warning("MinerU API 功能需要有效的 API 密钥和正确的端点配置")
-            logger.info("当前配置:")
-            logger.info(f"  - API 地址: {self.mineru_api_url}")
-            logger.info(f"  - API 密钥: {'已设置' if self.mineru_api_key else '未设置'}")
-            
-            # 返回提示信息而不是空字符串，这样用户可以知道发生了什么
-            return f"""
-# MinerU API 解析结果
-
-**注意**: MinerU API 功能需要进一步配置
-
-**文件**: {os.path.basename(file_path)}
-**API 地址**: {self.mineru_api_url}
-**API 密钥**: {'已配置' if self.mineru_api_key else '未配置（需要申请）'}
-
-## 配置说明
-
-1. 访问 https://mineru.net/ 申请 API 密钥
-2. 在 config/conf.ini 中配置正确的 API 密钥
-3. 确保网络连接正常
-
-## 当前状态
-
-MinerU API 集成已实现，但需要有效的 API 密钥才能正常工作。
-如果您已经有 API 密钥，请在配置文件中正确设置。
-
-**文件路径**: {file_path}
-**文件大小**: {os.path.getsize(file_path)} 字节
-"""
+            # 检查响应状态
+            if response.status_code == 200:
+                result = response.json()
+                
+                # 根据 MinerU API 响应格式提取文本内容
+                if isinstance(result, dict):
+                    # 首先检查是否有 results 字段（MinerU 的标准响应格式）
+                    if 'results' in result and isinstance(result['results'], dict):
+                        # 获取第一个文件的解析结果
+                        for filename, file_result in result['results'].items():
+                            if isinstance(file_result, dict) and 'md_content' in file_result:
+                                content = file_result['md_content']
+                                logger.info(f"MinerU API 解析成功，内容长度: {len(content)} 字符")
+                                return content
                     
+                    # 尝试其他可能的字段
+                    content = None
+                    for field in ['content', 'text', 'markdown', 'md_content', 'data']:
+                        if field in result and result[field]:
+                            content = result[field]
+                            break
+                    
+                    # 如果是列表格式，尝试提取第一个元素
+                    if not content and isinstance(result, dict):
+                        for key, value in result.items():
+                            if isinstance(value, list) and len(value) > 0:
+                                if isinstance(value[0], dict) and 'content' in value[0]:
+                                    content = value[0]['content']
+                                    break
+                                elif isinstance(value[0], str):
+                                    content = '\n'.join(value)
+                                    break
+                    
+                    if content:
+                        logger.info(f"MinerU API 解析成功，内容长度: {len(content)} 字符")
+                        return content
+                    else:
+                        # 如果没有找到预期字段，返回整个响应用于调试
+                        logger.warning(f"未找到预期的内容字段，返回原始响应: {result}")
+                        return str(result)
+                        
+                elif isinstance(result, str):
+                    # 如果直接返回字符串
+                    logger.info(f"MinerU API 解析成功，内容长度: {len(result)} 字符")
+                    return result
+                else:
+                    # 其他格式，转换为字符串
+                    content = str(result)
+                    logger.info(f"MinerU API 解析成功，内容长度: {len(content)} 字符")
+                    return content
+                
+            else:
+                error_msg = f"MinerU API 请求失败，状态码: {response.status_code}"
+                if response.text:
+                    error_msg += f"，错误信息: {response.text}"
+                logger.error(error_msg)
+                raise Exception(error_msg)
+                    
+        except requests.exceptions.Timeout:
+            error_msg = "MinerU API 请求超时"
+            logger.error(error_msg)
+            raise Exception(error_msg)
+        except requests.exceptions.ConnectionError:
+            error_msg = f"无法连接到 MinerU API 服务: {self.mineru_api_url}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
         except Exception as e:
             logger.error(f"MinerU API 提取失败 {file_path}: {e}")
-            return f"MinerU API 调用失败: {str(e)}"
+            raise Exception(f"MinerU API 调用失败: {str(e)}")
+    
     
     def _extract_with_textin(self, file_path: str) -> str:
         """使用 TextIn API 提取文本"""
