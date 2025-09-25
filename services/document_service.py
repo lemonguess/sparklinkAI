@@ -4,7 +4,8 @@ import logging
 from typing import Dict, Any, List
 import mimetypes
 import requests
-import configparser
+
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,17 +23,13 @@ class DocumentService:
             'text/plain', 'text/markdown', 'image/jpeg', 'image/png', 'image/gif'
         }
         
-        # 读取配置文件
-        self.config = configparser.ConfigParser()
-        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'conf.ini')
-        self.config.read(config_path, encoding='utf-8')
-        
-        # 获取解析器配置
-        self.parser_type = self.config.get('document_parser', 'parser_type', fallback='textin')
-        self.textin_api_url = self.config.get('document_parser', 'textin_api_url', fallback='')
-        self.textin_api_key = self.config.get('document_parser', 'textin_api_key', fallback='')
-        self.mineru_api_url = self.config.get('document_parser', 'mineru_api_url', fallback='https://mineru.net')
-        self.mineru_api_key = self.config.get('document_parser', 'mineru_api_key', fallback='')
+        # 从统一配置获取文档解析配置
+        self.parser_type = settings.parser_type
+        self.textin_api_url = settings.textin_api_url
+        self.textin_api_key = settings.TEXTIN_API_KEY
+        self.textin_api_secret = settings.TEXTIN_API_SECRET
+        self.mineru_api_url = settings.mineru_api_url
+        self.mineru_api_key = settings.mineru_api_key
     
     def extract_text_from_file(self, file_path: str, file_type: str) -> str:
         """从文件中提取文本内容"""

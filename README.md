@@ -14,6 +14,33 @@
 - **UUID用户系统**: 支持UUID格式的用户标识符
 - **知识库分组**: 支持文档分组管理，便于组织和检索
 - **软删除机制**: 支持文档和分组的软删除，保证数据完整性
+- **重排序优化**: 集成 rerank 服务，提升检索结果相关性
+- **OCR文字识别**: 支持图片文字提取，扩展文档处理能力
+- **现代化UI**: 响应式Web界面，支持多种交互模式
+
+## 🔧 技术栈
+
+### 后端技术
+- **框架**: FastAPI (高性能异步 Web 框架)
+- **数据库**: MySQL (关系型数据库)
+- **缓存**: Redis (内存数据库)
+- **向量数据库**: Milvus (向量相似性搜索)
+- **任务队列**: Celery (分布式任务队列)
+- **消息代理**: Redis (Celery broker)
+- **依赖管理**: uv (现代 Python 包管理器)
+
+### AI 服务
+- **LLM 服务**: SiliconFlow API (大语言模型)
+- **嵌入模型**: 支持多种嵌入模型
+- **重排序**: 智能搜索结果重排序
+- **OCR 识别**: TextIn OCR API
+
+### 前端技术
+- **模板引擎**: Jinja2
+- **样式**: 现代化 CSS3
+- **脚本**: 原生 JavaScript
+- **UI 组件**: 响应式设计
+- **Markdown**: marked.js 解析器
 
 ## 🏗️ 系统架构
 
@@ -32,6 +59,7 @@ graph TB
         KB[📚 知识库服务<br/>DocumentService]
         SEARCH[🔍 搜索服务<br/>SearchService]
         EMB[🧠 嵌入服务<br/>EmbeddingService]
+        RERANK[🎯 重排序服务<br/>RerankService]
     end
     
     subgraph "任务队列"
@@ -56,8 +84,10 @@ graph TB
     API --> SEARCH
     
     CHAT --> EMB
+    CHAT --> RERANK
     KB --> EMB
     SEARCH --> EMB
+    SEARCH --> RERANK
     
     EMB --> CELERY
     KB --> CELERY
@@ -78,164 +108,6 @@ graph TB
     style CELERY fill:#f1f8e9
 ```
 
-## 📊 数据库设计
-
-### MySQL 表结构
-
-#### 用户表 (users)
-```sql
-CREATE TABLE users (
-    id VARCHAR(255) PRIMARY KEY,           -- 用户唯一标识
-    username VARCHAR(255) NOT NULL,        -- 用户名
-    email VARCHAR(255),                    -- 邮箱地址
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP  -- 更新时间
-);
-```
-
-#### 聊天会话表 (chat_sessions)
-```sql
-CREATE TABLE chat_sessions (
-    id VARCHAR(255) PRIMARY KEY,           -- 会话唯一标识
-    user_id VARCHAR(255) NOT NULL,         -- 用户ID (外键)
-    title VARCHAR(500),                    -- 会话标题
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  -- 更新时间
-    FOREIGN KEY (user_id) REFERENCES users(id)
-);
-```
-
-#### 聊天消息表 (chat_messages)
-```sql
-CREATE TABLE chat_messages (
-    id INT AUTO_INCREMENT PRIMARY KEY,     -- 消息唯一标识
-    session_id VARCHAR(255) NOT NULL,      -- 会话ID (外键)
-    role ENUM('user', 'assistant') NOT NULL,  -- 消息角色
-    content TEXT NOT NULL,                 -- 消息内容
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
-    FOREIGN KEY (session_id) REFERENCES chat_sessions(id)
-);
-```
-
-#### 知识库分组表 (document_groups)
-```sql
-CREATE TABLE document_groups (
-    id INT AUTO_INCREMENT PRIMARY KEY,     -- 分组唯一标识
-    group_name VARCHAR(255) NOT NULL,      -- 分组名称
-    description TEXT,                      -- 分组描述
-    user_id VARCHAR(255) NOT NULL,         -- 用户ID (外键)
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  -- 更新时间
-    FOREIGN KEY (user_id) REFERENCES users(id)
-);
-```
-
-#### 文档嵌入任务表 (document_embedding_tasks)
-```sql
-CREATE TABLE document_embedding_tasks (
-    task_id VARCHAR(255) PRIMARY KEY,      -- 任务唯一标识
-    doc_id VARCHAR(255) NOT NULL,          -- 文档ID
-    doc_name VARCHAR(255) NOT NULL,        -- 文档名称
-    file_path VARCHAR(500),                -- 文件路径
-    content_type VARCHAR(100),             -- 内容类型
-    user_id VARCHAR(255) NOT NULL,         -- 用户ID (外键)
-    group_id INT,                          -- 分组ID (外键)
-    status ENUM('pending', 'processing', 'completed', 'failed') DEFAULT 'pending',  -- 任务状态
-    is_active BOOLEAN DEFAULT TRUE,        -- 是否激活 (软删除标记)
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 创建时间
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  -- 更新时间
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (group_id) REFERENCES document_groups(id)
-);
-```
-
-### Milvus 向量数据库集合结构
-
-#### 知识库向量集合 (sparklinkai_knowledge)
-```python
-# 集合字段定义
-fields = [
-    {
-        "name": "id",                    # 主键ID
-        "type": "VARCHAR",
-        "max_length": 100,
-        "is_primary": True,
-        "auto_id": False
-    },
-    {
-        "name": "doc_id",               # 文档ID
-        "type": "VARCHAR", 
-        "max_length": 200
-    },
-    {
-        "name": "doc_name",             # 文档名称
-        "type": "VARCHAR",
-        "max_length": 500
-    },
-    {
-        "name": "chunk_content",        # 文档分块内容
-        "type": "VARCHAR",
-        "max_length": 4000
-    },
-    {
-        "name": "vector",               # 向量数据
-        "type": "FLOAT_VECTOR",
-        "dimension": 1024               # 向量维度 (根据嵌入模型调整)
-    },
-    {
-        "name": "source_path",          # 源文件路径
-        "type": "VARCHAR",
-        "max_length": 1000
-    },
-    {
-        "name": "doc_type",             # 文档类型
-        "type": "VARCHAR",
-        "max_length": 50
-    },
-    {
-        "name": "user_id",              # 用户ID
-        "type": "VARCHAR",
-        "max_length": 50
-    },
-    {
-        "name": "group_id",             # 分组ID
-        "type": "INT64"
-    },
-    {
-        "name": "create_at",            # 创建时间
-        "type": "VARCHAR",
-        "max_length": 20
-    },
-    {
-        "name": "update_at",            # 更新时间
-        "type": "VARCHAR",
-        "max_length": 20
-    }
-]
-
-# 索引配置
-index_params = {
-    "metric_type": "IP",                # 内积相似度 (适合归一化向量)
-    "index_type": "IVF_FLAT",          # 索引类型
-    "params": {"nlist": 1024}          # 索引参数
-}
-```
-
-### 数据关系说明
-
-1. **用户 → 会话**: 一对多关系，一个用户可以有多个聊天会话
-2. **会话 → 消息**: 一对多关系，一个会话包含多条消息
-3. **用户 → 知识库分组**: 一对多关系，一个用户可以创建多个知识库分组
-4. **分组 → 文档任务**: 一对多关系，一个分组可以包含多个文档
-5. **文档任务 → 向量数据**: 一对多关系，一个文档会被分块并生成多个向量
-
-### 软删除机制
-
-- 所有主要实体都支持软删除 (`is_active` 字段)
-- 删除分组时会检查是否存在未删除的子文档
-- 删除文档时会同时清理对应的向量数据
-- 保证数据完整性和可恢复性
-
 ## 🚀 快速开始
 
 ### 环境要求
@@ -243,7 +115,7 @@ index_params = {
 - Python 3.13+
 - MySQL 8.0+
 - Redis 5.0+
-- Milvus 2.4+ (可选，用于向量存储)
+- Milvus 2.5+ (可选，用于向量存储)
 - uv (Python 包管理器)
 
 ### 安装步骤
@@ -262,29 +134,25 @@ uv sync
 
 3. **配置环境变量**
 ```bash
-# 创建 .env 文件，填入你的 API 密钥
+# 复制环境变量示例文件
+cp .env.example .env
+
+# 编辑 .env 文件，填入你的 API 密钥
 vim .env
 ```
 
-4. **配置数据库**
-```bash
-# 创建 MySQL 数据库
-mysql -u root -p -e "CREATE DATABASE sparklinkai;"
-
-# 启动 Redis
-redis-server
-```
-
-5. **启动服务**
+4. **启动服务**
 ```bash
 # 启动 FastAPI 服务
 uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload 
 
 # 启动 Celery Worker (新终端)
-uv run python -m celery -A services.celery_app worker --loglevel=info 
+uv run python celery_worker.py
+# uv run python -m celery -A services.celery_app worker --loglevel=info 
 ```
 
-6. **访问服务**
+5. **访问服务**
+- Web 界面: http://localhost:8000
 - API 文档: http://localhost:8000/docs
 - 健康检查: http://localhost:8000/health
 
@@ -294,7 +162,7 @@ uv run python -m celery -A services.celery_app worker --loglevel=info
 
 ```env
 # SiliconFlow API 配置 (主要LLM和嵌入模型)
-SILICONFLOW_API_KEY=your_siliconflow_api_key_here
+SILICONFLOW_API_KEY=your-api-key
 SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
 
 # TextIn OCR API 配置
@@ -302,7 +170,7 @@ TEXTIN_API_KEY=your_textin_api_key_here
 TEXTIN_API_SECRET=your_textin_api_secret_here
 
 # Web 搜索 API 配置 (博查)
-WEB_SEARCH_API_KEY=your_web_search_api_key_here
+WEB_SEARCH_API_KEY=your-web-search-api-key
 
 # 数据库配置
 MYSQL_HOST=localhost
@@ -311,13 +179,28 @@ MYSQL_USER=root
 MYSQL_PASSWORD=your_mysql_password
 MYSQL_DATABASE=sparklinkai
 
+# Redis 配置
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=
-REDIS_DB=0
+# 短期记忆缓存配置（聊天历史临时存储，24小时过期）
+REDIS_CHAT_MEMORY_DB=5
 
+# Celery 配置 (使用不同的Redis数据库)
+CELERY_BROKER_DB=1
+CELERY_RESULT_DB=2
+
+# Milvus 配置
 MILVUS_HOST=localhost
 MILVUS_PORT=19530
+MILVUS_USER=
+MILVUS_PASSWORD=
+MILVUS_COLLECTION_NAME=sparklinkai_knowledge
+
+# 应用配置
+APP_HOST=0.0.0.0
+APP_PORT=8000
+APP_DEBUG=True
 ```
 
 ### conf.ini 配置文件
@@ -327,277 +210,6 @@ MILVUS_PORT=19530
 - 知识库配置
 - 搜索策略配置
 - 性能参数配置
-
-## 🔧 API 接口文档
-
-### 聊天相关接口
-
-#### 1. 发送聊天消息
-```bash
-POST /api/v1/chat/chat
-Content-Type: application/json
-
-{
-    "message": "你好，请介绍一下人工智能",
-    "user_id": "your-user-id",
-    "session_id": "your-session-id",
-    "use_knowledge_base": true,
-    "use_web_search": true,
-    "stream": false
-}
-```
-
-#### 2. 流式聊天
-```bash
-POST /api/v1/chat/chat/stream
-Content-Type: application/json
-
-{
-    "message": "你好，请介绍一下人工智能",
-    "user_id": "your-user-id", 
-    "session_id": "your-session-id",
-    "use_knowledge_base": true,
-    "use_web_search": true
-}
-```
-
-#### 3. 创建聊天会话
-```bash
-POST /api/v1/chat/create-session
-Content-Type: application/json
-
-{
-    "user_id": "your-user-id",
-    "title": "新的聊天会话"
-}
-```
-
-#### 4. 获取会话列表
-```bash
-GET /api/v1/chat/sessions?user_id=your-user-id&skip=0&limit=20
-```
-
-#### 5. 获取会话消息
-```bash
-GET /api/v1/chat/sessions/{session_id}/messages?skip=0&limit=50
-```
-
-#### 6. 删除会话
-```bash
-DELETE /api/v1/chat/sessions/{session_id}?user_id=your-user-id
-```
-
-#### 7. 更新会话标题
-```bash
-PUT /api/v1/chat/sessions/{session_id}/title
-Content-Type: application/json
-
-{
-    "title": "新的会话标题"
-}
-```
-
-#### 8. 停止流式响应
-```bash
-POST /api/v1/chat/stop-stream
-Content-Type: application/json
-
-{
-    "request_id": "your-request-id"
-}
-```
-
-### 知识库相关接口
-
-#### 1. 创建知识库分组
-```bash
-POST /api/v1/kb/group/create
-Content-Type: application/json
-
-{
-    "group_name": "我的知识库",
-    "description": "用于存储相关文档的知识库",
-    "user_id": "your-user-id"
-}
-```
-
-#### 2. 获取知识库分组列表
-```bash
-GET /api/v1/kb/group/list?user_id=your-user-id&skip=0&limit=20
-```
-
-#### 3. 更新知识库分组
-```bash
-PUT /api/v1/kb/group/update/{group_id}?user_id=your-user-id
-Content-Type: application/json
-
-{
-    "group_name": "更新后的知识库名称",
-    "description": "更新后的描述"
-}
-```
-
-#### 4. 删除知识库分组
-```bash
-DELETE /api/v1/kb/group/delete?group_id=1&user_id=your-user-id
-```
-
-#### 5. 获取分组内文档列表
-```bash
-POST /api/v1/kb/group/detail
-Content-Type: application/json
-
-{
-    "group_id": 1,
-    "user_id": "your-user-id"
-}
-```
-
-#### 6. 上传文档文件
-```bash
-POST /api/v1/kb/tasks/file_process
-Content-Type: multipart/form-data
-
-file: [文档文件]
-user_id: your-user-id
-group_id: 1 (可选)
-```
-
-#### 7. 处理文本内容
-```bash
-POST /api/v1/kb/tasks/post_process
-Content-Type: application/json
-
-{
-    "content": "要处理的文本内容",
-    "title": "文档标题",
-    "user_id": "your-user-id",
-    "group_id": 1
-}
-```
-
-#### 8. 获取任务状态
-```bash
-GET /api/v1/kb/tasks/{task_id}/status
-```
-
-#### 9. 删除文档
-```bash
-DELETE /api/v1/kb/document/delete?doc_id=your-doc-id&user_id=your-user-id
-```
-
-#### 10. 搜索知识库
-```bash
-POST /api/v1/kb/search
-Content-Type: application/json
-
-{
-    "query": "人工智能的发展历史",
-    "top_k": 10,
-    "similarity_threshold": 0.7,
-    "collection_name": "kb_12345678"
-}
-```
-
-### 系统相关接口
-
-#### 1. 健康检查
-```bash
-GET /health
-```
-
-#### 2. 系统状态
-```bash
-GET /api/v1/system/status
-```
-
-#### 3. 系统统计
-```bash
-GET /api/v1/system/stats
-```
-
-#### 4. 数据库状态
-```bash
-GET /api/v1/system/db-status
-```
-
-#### 5. 系统配置
-```bash
-GET /api/v1/system/config
-```
-
-## 🧠 智能搜索
-
-### 智能决策策略
-
-1. **知识库优先**: 首先搜索本地知识库
-2. **智能判断**: 根据结果质量和置信度决定是否联网
-3. **动态调整**: 根据查询类型调整搜索策略
-4. **结果融合**: 智能合并和排序多源结果
-
-### 决策因子
-
-- 结果数量阈值
-- 置信度阈值
-- 覆盖度评估
-- 查询类型分析
-- 质量分数计算
-
-### 使用示例
-
-```python
-from services.chat_service import ChatService, SearchStrategy
-
-# 创建聊天服务实例
-chat_service = ChatService()
-
-# 方式1: 智能搜索
-result = await chat_service.intelligent_search(
-    query="人工智能的最新发展",
-    strategy=SearchStrategy.AUTO,
-    max_results=10
-)
-
-print(f"搜索策略: {result['strategy']}")
-print(f"决策原因: {result['decision_reasoning']}")
-print(f"结果数量: {result['total_results_count']}")
-print(f"使用框架: {result['performance_metrics']['framework']}")
-
-# 方式2: 智能聊天（自动搜索+生成回复）
-response = await chat_service.intelligent_chat(
-    message="请介绍人工智能的最新发展",
-    strategy=SearchStrategy.AUTO
-)
-
-print(f"AI回复: {response}")
-```
-
-## 📊 系统监控
-
-### 健康检查
-
-```bash
-# 检查系统状态
-curl http://localhost:8000/health
-
-# 检查系统信息
-curl http://localhost:8000/api/v1/system/status
-
-# 获取系统统计信息
-curl http://localhost:8000/api/v1/system/stats
-
-# 检查数据库连接
-curl http://localhost:8000/api/v1/system/db-status
-```
-
-### 性能指标
-
-- 响应时间监控（通过 X-Process-Time 头部）
-- 搜索质量评估
-- 资源使用统计
-- 任务执行状态
-- 数据库连接状态
-- Redis 连接状态
 
 ## 🔄 开发指南
 
@@ -609,70 +221,64 @@ sparklinkAI/
 │   ├── chat.py              # 聊天相关接口
 │   ├── knowledge_base.py    # 知识库相关接口
 │   └── system.py            # 系统相关接口
+├── basereal.py              # 实时交互基础类（支持闲置监控）
 ├── core/                    # 核心配置
 │   ├── config.py            # 配置管理
 │   └── database.py          # 数据库连接
 ├── models/                  # 数据模型
 │   ├── database.py          # 数据库模型
+│   ├── enums.py             # 枚举定义
 │   └── schemas.py           # Pydantic 模型
 ├── services/                # 业务服务
 │   ├── chat_service.py      # 聊天服务
 │   ├── document_service.py  # 文档处理服务
 │   ├── embedding_service.py # 嵌入向量服务
-│   ├── knowledge_service.py # 知识库服务
+│   ├── rerank_service.py    # 重排序服务
 │   ├── search_service.py    # 搜索服务
 │   ├── vector_service.py    # 向量数据库服务
 │   ├── celery_app.py        # Celery 应用配置
 │   └── tasks/               # Celery 任务
-│       ├── document_tasks.py    # 文档处理任务
-│       ├── embedding_tasks.py   # 嵌入向量任务
-│       └── search_tasks.py      # 搜索任务
+│       └── embedding_tasks.py   # 嵌入向量任务
 ├── config/                  # 配置文件
 │   └── conf.ini             # 系统配置
 ├── static/                  # 静态文件
 │   ├── css/                 # 样式文件
+│   │   ├── chat.css         # 聊天界面样式
+│   │   ├── common.css       # 通用样式
+│   │   ├── knowledge.css    # 知识库界面样式
+│   │   └── style.css        # 主样式文件
+│   ├── images/              # 图片资源
+│   │   └── favicon.svg      # 网站图标
 │   ├── js/                  # JavaScript 文件
+│   │   ├── app.js           # 主应用脚本
+│   │   ├── chat.js          # 聊天功能脚本
+│   │   ├── knowledge.js     # 知识库功能脚本
+│   │   └── utils.js         # 工具函数
 │   └── libs/                # 第三方库
+│       └── marked.min.js    # Markdown 解析库
 ├── templates/               # 模板文件
-│   └── index.html           # 主页模板
+│   ├── base.html            # 基础模板
+│   ├── chat.html            # 聊天页面
+│   ├── index.html           # 主页模板
+│   ├── knowledge.html       # 知识库页面
+│   └── modals/              # 模态框组件
+│       └── common_modals.html
 ├── utils/                   # 工具模块
-├── .env                     # 环境变量
+│   ├── extract_keyword.py   # 关键词提取
+│   └── user_utils.py        # 用户工具函数
+├── .env.example             # 环境变量示例
+├── .gitignore               # Git 忽略文件
+├── .python-version          # Python 版本配置
+├── Dockerfile               # Docker 镜像配置
+├── delete_remaining_tables.py # 数据库清理脚本
+├── docker-compose.yml       # Docker 编排配置
 ├── main.py                  # 主程序入口
 ├── celery_worker.py         # Celery Worker
 ├── pyproject.toml           # 项目依赖配置
-└── docker-compose.yml       # Docker 编排配置
+├── reset_database.py        # 数据库重置脚本
+└── uv.lock                  # 依赖锁定文件
 ```
 
-### 添加新功能
-
-1. **添加新的API端点**
-   - 在 `api/` 下创建新的路由文件
-   - 在 `main.py` 中注册路由
-
-2. **添加新的服务**
-   - 在 `services/` 下创建服务类
-   - 实现业务逻辑和外部API调用
-
-3. **添加新的任务**
-   - 在 `services/tasks/` 下创建任务文件
-   - 使用 `@celery_app.task` 装饰器
-
-### 开发工具
-
-```bash
-# 安装开发依赖
-uv add --dev pytest pytest-cov black isort
-
-# 代码格式化
-uv run black .
-uv run isort .
-
-# 运行测试（需要先安装pytest）
-uv run pytest
-
-# 测试覆盖率
-uv run pytest --cov=.
-```
 
 ## 🚀 部署
 
@@ -686,22 +292,6 @@ docker build -t sparklinkai .
 docker-compose up -d
 ```
 
-### 生产环境
-
-1. 使用 Gunicorn 或 uWSGI 部署 FastAPI
-2. 使用 Nginx 作为反向代理
-3. 配置 SSL 证书
-4. 设置监控和日志
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 项目
-2. 创建特性分支
-3. 提交更改
-4. 推送到分支
-5. 创建 Pull Request
 
 ## 📄 许可证
 

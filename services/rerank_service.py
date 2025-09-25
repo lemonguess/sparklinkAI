@@ -1,8 +1,7 @@
 """重排序服务"""
 import logging
 import httpx
-from typing import List, Dict, Any, Tuple
-import os
+from typing import List, Dict, Any
 
 from core.config import settings
 
@@ -15,7 +14,7 @@ class RerankService:
         self.api_key = settings.SILICONFLOW_API_KEY
         self.base_url = settings.SILICONFLOW_BASE_URL
         self.model_name = settings.rerank_model
-        self.rerank_top_k = settings.config.getint('knowledge_base', 'rerank_top_k', fallback=5)
+        self.rerank_top_k = settings.rerank_top_k
         
         logger.info(f"重排序配置加载成功: 模型={self.model_name}, top_k={self.rerank_top_k}, API可用={'是' if self.api_key else '否'}")
         

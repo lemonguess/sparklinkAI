@@ -1,7 +1,7 @@
 """配置管理模块"""
 import os
 import configparser
-from typing import List, Optional
+from typing import List
 from dotenv import load_dotenv
 from datetime import datetime
 # 加载环境变量
@@ -22,6 +22,11 @@ class Settings:
     # TextIn OCR配置
     TEXTIN_API_KEY: str = os.getenv("TEXTIN_API_KEY", "")
     TEXTIN_API_SECRET: str = os.getenv("TEXTIN_API_SECRET", "")
+    
+    # 文档解析配置
+    TEXTIN_API_URL: str = os.getenv("TEXTIN_API_URL", "https://api.textin.com")
+    MINERU_API_URL: str = os.getenv("MINERU_API_URL", "https://mineru.net")
+    MINERU_API_KEY: str = os.getenv("MINERU_API_KEY", "")
     
     # Web搜索配置
     WEB_SEARCH_API_KEY: str = os.getenv("WEB_SEARCH_API_KEY", "")
@@ -48,7 +53,6 @@ class Settings:
     APP_HOST: str = os.getenv("APP_HOST", "0.0.0.0")
     APP_PORT: int = int(os.getenv("APP_PORT", "8000"))
     APP_DEBUG: bool = os.getenv("APP_DEBUG", "True").lower() == "true"
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key")
     
     # Celery配置
     CELERY_BROKER_DB: int = int(os.getenv("CELERY_BROKER_DB", "1"))
@@ -225,5 +229,32 @@ class Settings:
     def conversation_history_limit(self) -> int:
         """获取对话历史记录限制数量"""
         return self.config.getint('chat', 'conversation_history_limit', fallback=20)
+    
+    # 文档解析配置
+    @property
+    def parser_type(self) -> str:
+        """获取文档解析器类型"""
+        return self.config.get('document_parser', 'PARSER_TYPE', fallback='mineru')
+    
+    @property
+    def textin_api_url(self) -> str:
+        """获取 TextIn API URL"""
+        return self.TEXTIN_API_URL
+    
+    @property
+    def mineru_api_url(self) -> str:
+        """获取 MinerU API URL"""
+        return self.MINERU_API_URL
+    
+    @property
+    def mineru_api_key(self) -> str:
+        """获取 MinerU API Key"""
+        return self.MINERU_API_KEY
+    
+    @property
+    def rerank_top_k(self) -> int:
+        """获取重排序返回的文档数量"""
+        return self.config.getint('knowledge_base', 'rerank_top_k', fallback=5)
+
 # 全局配置实例
 settings = Settings()

@@ -397,14 +397,15 @@ class SearchService:
         similarity_threshold: float = settings.similarity_threshold,
         collection_name: Optional[str] = settings.MILVUS_COLLECTION_NAME,
         group_id: Optional[str] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        use_rerank: bool = False,
     ) -> List[Dict[str, Any]]:
         """知识库搜索"""
         try:
             # 生成查询向量
             query_embedding = await self.embedding_service.generate_embedding(query)
             # 向量搜索
-            results = await self.vector_service.search_vectors_async(
+            search_results = await self.vector_service.search_vectors_async(
                 collection_name=collection_name,
                 query_embedding=query_embedding,
                 top_k=top_k,
@@ -412,101 +413,17 @@ class SearchService:
                 user_id=user_id,
                 group_id=group_id
             )
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"知识库搜索失败: {e}")
-            return []
-    
-    async def knowledge_search_with_rerank(
-        self,
-        query: str,
-        top_k: int = 10,
-        similarity_threshold: float = None,
-        collection_name: Optional[str] = None,
-        use_rerank: bool = False,
-        rerank_top_k: int = 5
-    ) -> List[Dict[str, Any]]:
-        """
-        知识库搜索（支持重排序）
-        
-        Args:
-            query: 查询文本
-            top_k: 返回结果数量
-            similarity_threshold: 相似度阈值
-            collection_name: 集合名称
-            use_rerank: 是否使用重排序
-            rerank_top_k: 重排序后返回的结果数量
-            
-        Returns:
-            搜索结果列表
-        """
-        try:
-            # 如果没有提供相似度阈值，使用配置文件中的默认值
-            if similarity_threshold is None:
-                similarity_threshold = settings.similarity_threshold
-                
-            # 向量搜索
-            search_results = await self.vector_service.search_vectors_async(
-                query_text=query,
-                top_k=top_k,
-                similarity_threshold=similarity_threshold,
-                collection_name=collection_name
-            )
-            
-            if not search_results:
-                return []
-            
             # 如果使用重排序
             if use_rerank and len(search_results) > 1:
-                # 提取文档内容用于重排序
-                documents = [result.get("content", "") for result in search_results]
-                
                 # 执行重排序
                 rerank_results = await self.rerank_service.rerank(
                     query=query,
-                    documents=documents,
-                    top_k=min(rerank_top_k, len(documents))
+                    documents=search_results,
+                    top_k=top_k // 2 + 1
                 )
-                
-                # 根据重排序结果重新排列原始结果
-                reranked_search_results = []
-                for rerank_item in rerank_results:
-                    original_index = rerank_item["index"]
-                    if original_index < len(search_results):
-                        result = search_results[original_index].copy()
-                        result["rerank_score"] = rerank_item["score"]
-                        reranked_search_results.append(result)
-                
-                return reranked_search_results
-            
-            return search_results
-            
+                return rerank_results
+            else:
+                return search_results
         except Exception as e:
-            logger.error(f"知识库搜索失败: {str(e)}")
-            raise e
-    
-    async def get_document_chunks(
-        self,
-        document_id: str,
-        collection_name: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        获取文档的所有分块
-        
-        Args:
-            document_id: 文档ID
-            collection_name: 集合名称
-            
-        Returns:
-            文档分块列表
-        """
-        try:
-            # 这里可以根据需要实现获取特定文档分块的逻辑
-            # 目前先返回空列表
+            logger.error(f"知识库搜索失败: {e}")
             return []
-            
-        except Exception as e:
-            logger.error(f"获取文档分块失败: {str(e)}")
-            raise e

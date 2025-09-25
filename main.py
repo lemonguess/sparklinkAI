@@ -7,7 +7,6 @@ from fastapi.templating import Jinja2Templates
 import time
 import logging
 from contextlib import asynccontextmanager
-
 from core.config import settings
 from core import db_manager
 from api import chat, knowledge_base, system
@@ -27,40 +26,34 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时执行
     logger.info("正在启动 SparkLink AI 应用...")
-    
     # 创建数据库表
     try:
         db_manager.create_tables()
         logger.info("数据库表创建成功")
     except Exception as e:
         logger.error(f"数据库表创建失败: {e}")
-    
     # 测试数据库连接
     if db_manager.test_connection():
         logger.info("数据库连接正常")
     else:
         logger.error("数据库连接失败")
-    
     # 测试Redis连接
     if db_manager.test_redis_connection():
         logger.info("Redis连接正常")
     else:
         logger.error("Redis连接失败")
-    
     # 创建默认用户
     try:
         create_default_user()
         logger.info("默认用户检查/创建完成")
     except Exception as e:
         logger.error(f"默认用户创建失败: {e}")
-    
     # 创建默认知识库分组
     try:
         ensure_default_kb_groups()
         logger.info("默认知识库分组检查/创建完成")
     except Exception as e:
         logger.error(f"默认知识库分组创建失败: {e}")
-    
     # 创建上传目录
     try:
         import os
@@ -69,7 +62,6 @@ async def lifespan(app: FastAPI):
         logger.info(f"上传目录创建/检查完成: {upload_dir}")
     except Exception as e:
         logger.error(f"上传目录创建失败: {e}")
-
     # 初始化 Milvus 集合
     try:
         vector_service = VectorService()
@@ -80,9 +72,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Milvus 未连接，向量相关功能不可用")
     except Exception as e:
         logger.error(f"Milvus 初始化失败: {e}")
-    
     logger.info("SparkLink AI 应用启动完成")
-    
     yield
     
     # 关闭时执行

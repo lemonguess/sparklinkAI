@@ -58,6 +58,7 @@ class ChatService:
                     group_id=group_id,
                     top_k=kg_max_results,
                     similarity_threshold=similarity_threshold,
+                    use_rerank=True,
                 )
             # 第三步：判断是否需要网络搜索
             if strategy == SearchStrategy.WEB_ONLY:
